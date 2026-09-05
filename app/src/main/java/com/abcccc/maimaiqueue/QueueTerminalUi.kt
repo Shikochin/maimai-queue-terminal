@@ -17448,6 +17448,11 @@ private fun TerminalInstallationDetailsDialog(
 private fun VersionHistoryDialog(onDismiss: () -> Unit) {
     val releases = listOf(
         Triple(
+            "0.13.4",
+            "网页与玩家资料推荐修复",
+            "修复手机二维码创建玩家资料页面首屏空白，统一中点分隔符的视觉间距，并按近期游玩频率、新资料曝光期、历史熟悉度和最近使用时间综合推荐玩家资料。"
+        ),
+        Triple(
             "0.13.3",
             "网页登录与二维码建档",
             "网页登录先查询 QQ 是否已绑定，再显示密码；未绑定时提示先绑定网页账户。终端新建玩家资料默认生成一次性二维码，手机网页创建并绑定账户；仍可选择仅创建本地玩家资料。二维码绑定终端运行实例，重启或过期后自动失效。"

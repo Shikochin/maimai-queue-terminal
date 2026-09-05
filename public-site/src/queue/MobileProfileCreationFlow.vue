@@ -237,8 +237,8 @@ onBeforeUnmount(() => {})
 </template>
 
 <style scoped>
-.profile-creation-shell { min-height: 100vh; background: #f5f5f7; color: #1d1d1f; }
-.profile-creation-page { width: min(680px, 100%); min-height: 100vh; margin: 0 auto; padding: 18px 16px calc(32px + env(safe-area-inset-bottom)); }
+.profile-creation-shell { position: fixed; z-index: 10000; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: #f5f5f7; color: #1d1d1f; }
+.profile-creation-page { width: min(680px, 100%); min-height: 100%; margin: 0 auto; padding: calc(18px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
 .profile-creation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .profile-creation-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .profile-creation-brand > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: #007aff; background: #e8f2ff; }
@@ -277,7 +277,7 @@ onBeforeUnmount(() => {})
 .is-progress svg { animation: profile-creation-spin 1s linear infinite; }
 @keyframes profile-creation-spin { to { transform: rotate(360deg); } }
 @media (max-width: 520px) {
-  .profile-creation-page { padding-top: 14px; }
+  .profile-creation-page { padding-top: calc(14px + env(safe-area-inset-top)); }
   .profile-creation-intro h2 { font-size: 21px; }
   .profile-choice-row.is-three { grid-template-columns: 1fr; }
 }

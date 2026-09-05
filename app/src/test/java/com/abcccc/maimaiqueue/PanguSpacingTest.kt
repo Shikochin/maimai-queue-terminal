@@ -10,14 +10,14 @@ import org.junit.Test
 
 class PanguSpacingTest {
     @Test
-    fun spacesChineseAroundLettersNumbersAndHanMiddleDots() {
+    fun spacesChineseAroundLettersAndNumbersButKeepsMiddleDotsCompact() {
         assertEquals(
             "位置 A1·机台 A，30 分钟后可游玩。",
             panguSpacing("位置A1·机台A，30分钟后可游玩。")
         )
-        assertEquals("左侧 · 机台 A", panguSpacing("左侧·机台 A"))
-        assertEquals("线上登记 · 待签到", panguSpacing("线上登记·待签到"))
-        assertEquals("未到场 · 已移除登记", panguSpacing("未到场 · 已移除登记"))
+        assertEquals("左侧·机台 A", panguSpacing("左侧·机台 A"))
+        assertEquals("线上登记·待签到", panguSpacing("线上登记·待签到"))
+        assertEquals("未到场·已移除登记", panguSpacing("未到场 · 已移除登记"))
         assertEquals("A1·固定组合", panguSpacing("A1 · 固定组合"))
         assertEquals("第 2 次轮空", panguSpacing("第2次轮空"))
         assertEquals("QQ 号 123456", panguSpacing("QQ号123456"))
@@ -90,10 +90,10 @@ class PanguSpacingTest {
 
         val formatted = panguSpacing(source)
 
-        assertEquals("左侧 · 机台 A", formatted.text)
+        assertEquals("左侧·机台 A", formatted.text)
         assertEquals(1, formatted.spanStyles.size)
-        assertEquals(3, formatted.spanStyles.single().start)
-        assertEquals(4, formatted.spanStyles.single().end)
+        assertEquals(2, formatted.spanStyles.single().start)
+        assertEquals(3, formatted.spanStyles.single().end)
         assertEquals(FontWeight.Bold, formatted.spanStyles.single().item.fontWeight)
     }
 }

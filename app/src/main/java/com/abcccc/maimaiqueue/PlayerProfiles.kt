@@ -4,6 +4,8 @@ import java.text.Collator
 import java.net.URI
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.exp
+import kotlin.math.ln1p
 
 private val chineseNicknameCollator: Collator = Collator.getInstance(Locale.CHINA).apply {
     strength = Collator.PRIMARY
@@ -47,6 +49,7 @@ data class PlayerProfile(
     val avatarReference: String? = null,
     val usageCount: Int = 0,
     val lastUsedAtMillis: Long? = null,
+    val recentUsageAtMillis: List<Long> = emptyList(),
     val qqVisibility: QqVisibility = QqVisibility.TERMINAL_ONLY,
     val notificationPreferences: QueueNotificationPreferences =
         QueueNotificationPreferences(),
@@ -94,10 +97,29 @@ data class PlayerProfile(
         defaultPreference = preferenceToRemember?.toProfilePlayPreference() ?: defaultPreference,
         usageCount = usageCount + 1,
         lastUsedAtMillis = atMillis,
+        recentUsageAtMillis = normalizeRecentUsageTimestamps(
+            recentUsageAtMillis + listOfNotNull(lastUsedAtMillis) + atMillis,
+            lastUsedAtMillis = atMillis
+        ),
         revision = revision + 1L,
         updatedAtMillis = atMillis
     )
 }
+
+internal const val MAX_RECENT_PLAYER_USAGE_EVENTS = 16
+
+internal fun normalizeRecentUsageTimestamps(
+    timestamps: Iterable<Long>,
+    lastUsedAtMillis: Long? = null
+): List<Long> = buildList {
+    addAll(timestamps.filter { it > 0L })
+    lastUsedAtMillis?.takeIf { it > 0L }?.let(::add)
+}.asSequence()
+    .distinct()
+    .sortedDescending()
+    .take(MAX_RECENT_PLAYER_USAGE_EVENTS)
+    .sorted()
+    .toList()
 
 val PlayerProfile.canEditOnTerminal: Boolean
     get() = !webAccountBound || terminalEditingAllowed
@@ -214,7 +236,8 @@ private val QQ_NUMBER_LENGTH_RANGE = 5..MAX_QQ_NUMBER_LENGTH
 fun filterAndSortPlayerProfiles(
     profiles: List<PlayerProfile>,
     query: String,
-    sortMode: ProfileSortMode
+    sortMode: ProfileSortMode,
+    nowMillis: Long = System.currentTimeMillis()
 ): List<PlayerProfile> {
     val normalizedQuery = query.trim()
     val filtered = if (normalizedQuery.isEmpty()) {
@@ -229,16 +252,94 @@ fun filterAndSortPlayerProfiles(
     }
     val nicknameComparator = Comparator<PlayerProfile> { first, second ->
         chineseNicknameCollator.compare(first.nickname, second.nickname)
+            .takeIf { it != 0 }
+            ?: first.id.compareTo(second.id)
     }
-    return when (sortMode) {
-        ProfileSortMode.RECOMMENDED -> filtered.sortedWith(
-            compareByDescending<PlayerProfile> { it.usageCount }
+    val modeComparator = when (sortMode) {
+        ProfileSortMode.RECOMMENDED ->
+            compareByDescending<PlayerProfile> { playerProfileRecommendationScore(it, nowMillis) }
                 .thenByDescending { it.lastUsedAtMillis ?: Long.MIN_VALUE }
+                .thenByDescending { it.createdAtMillis }
                 .then(nicknameComparator)
+        ProfileSortMode.ALPHABETICAL -> nicknameComparator
+    }
+    val comparator = if (normalizedQuery.isEmpty()) {
+        modeComparator
+    } else {
+        compareBy<PlayerProfile> { playerProfileSearchMatchRank(it, normalizedQuery) }
+            .then(modeComparator)
+    }
+    return filtered.sortedWith(comparator)
+}
+
+internal fun playerProfileRecommendationScore(
+    profile: PlayerProfile,
+    nowMillis: Long
+): Double {
+    val recentUsageScore = normalizeRecentUsageTimestamps(
+        profile.recentUsageAtMillis,
+        profile.lastUsedAtMillis
+    ).sumOf { usedAtMillis ->
+        val ageMillis = elapsedMillis(nowMillis, usedAtMillis)
+        if (ageMillis > RECENT_USAGE_WINDOW_MILLIS) {
+            0.0
+        } else {
+            RECENT_USAGE_EVENT_WEIGHT * exp(
+                -DECAY_PER_MILLI * ageMillis / RECENT_USAGE_HALF_LIFE_MILLIS
+            )
+        }
+    }
+    val profileAgeMillis = elapsedMillis(nowMillis, profile.createdAtMillis)
+    val newProfileScore = if (profileAgeMillis < NEW_PROFILE_BOOST_WINDOW_MILLIS) {
+        NEW_PROFILE_MAX_BOOST *
+            (1.0 - profileAgeMillis.toDouble() / NEW_PROFILE_BOOST_WINDOW_MILLIS)
+    } else {
+        0.0
+    }
+    val lifetimeScore = minOf(
+        LIFETIME_USAGE_MAX_SCORE,
+        ln1p(profile.usageCount.coerceAtLeast(0).toDouble()) * LIFETIME_USAGE_LOG_WEIGHT
+    )
+    val lastUsageScore = profile.lastUsedAtMillis?.let { lastUsedAtMillis ->
+        LAST_USAGE_MAX_SCORE * exp(
+            -DECAY_PER_MILLI * elapsedMillis(nowMillis, lastUsedAtMillis) /
+                LAST_USAGE_HALF_LIFE_MILLIS
         )
-        ProfileSortMode.ALPHABETICAL -> filtered.sortedWith(nicknameComparator)
+    } ?: 0.0
+    return recentUsageScore + newProfileScore + lifetimeScore + lastUsageScore
+}
+
+private fun elapsedMillis(nowMillis: Long, eventAtMillis: Long): Double =
+    (nowMillis - eventAtMillis).coerceAtLeast(0L).toDouble()
+
+private fun playerProfileSearchMatchRank(profile: PlayerProfile, query: String): Int {
+    val nickname = profile.nickname
+    val identifiers = buildList {
+        profile.normalizedQqNumber()?.let(::add)
+        profile.publicPlayerId?.let(::add)
+        addAll(profile.publicPlayerIdAliases)
+    }
+    return when {
+        nickname.equals(query, ignoreCase = true) || identifiers.any { it == query } -> 0
+        nickname.startsWith(query, ignoreCase = true) || identifiers.any {
+            it.startsWith(query)
+        } -> 1
+        nickname.contains(query, ignoreCase = true) -> 2
+        else -> 3
     }
 }
+
+private const val MILLIS_PER_DAY = 24L * 60L * 60L * 1_000L
+private const val RECENT_USAGE_WINDOW_MILLIS = 90L * MILLIS_PER_DAY
+private const val RECENT_USAGE_HALF_LIFE_MILLIS = 14.0 * MILLIS_PER_DAY
+private const val RECENT_USAGE_EVENT_WEIGHT = 36.0
+private const val NEW_PROFILE_BOOST_WINDOW_MILLIS = 14L * MILLIS_PER_DAY
+private const val NEW_PROFILE_MAX_BOOST = 72.0
+private const val LIFETIME_USAGE_LOG_WEIGHT = 6.0
+private const val LIFETIME_USAGE_MAX_SCORE = 28.0
+private const val LAST_USAGE_HALF_LIFE_MILLIS = 21.0 * MILLIS_PER_DAY
+private const val LAST_USAGE_MAX_SCORE = 16.0
+private const val DECAY_PER_MILLI = 0.6931471805599453
 
 fun ProfilePlayPreference.toPlayPreferenceOrNull(): PlayPreference? = when (this) {
     ProfilePlayPreference.SOLO -> PlayPreference.SOLO

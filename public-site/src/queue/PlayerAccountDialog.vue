@@ -361,10 +361,10 @@ function accountQueueEstimateText(registration) {
 }
 
 function accountQueueStateText(registration) {
-  if (registration.online_registration_pending_check_in) return '线上登记 · 待签到'
+  if (registration.online_registration_pending_check_in) return '线上登记·待签到'
   if (registration.temporarily_away) {
     const skippedTurns = registration.temporary_away_skipped_turns || 0
-    return skippedTurns > 0 ? `暂时离开 · 已轮空 ${skippedTurns} 次` : '暂时离开'
+    return skippedTurns > 0 ? `暂时离开·已轮空 ${skippedTurns} 次` : '暂时离开'
   }
   if (registration.deferred_once) return '暂缓一次'
   return registration.preference === 'SOLO' ? '单人游玩' : '允许他人加入'

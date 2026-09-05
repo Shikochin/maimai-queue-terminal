@@ -174,7 +174,7 @@ internal fun ManagementSettingsPage(
                             when {
                                 !terminalSettings.supported -> "当前终端版本不支持管理后台设置接管"
                                 !overview.terminalPolicy.managementAppBound -> "请先在权限页绑定并接管终端设置"
-                                else -> "设置修订 ${terminalSettings.revision} · 修改后由现场终端执行"
+                                else -> "设置修订 ${terminalSettings.revision}·修改后由现场终端执行"
                             },
                             color = SecondaryText,
                             style = MaterialTheme.typography.bodySmall
@@ -651,7 +651,7 @@ private fun ManagementSettingsMachineRow(
             Column(Modifier.weight(1f)) {
                 Text(machine.name, color = PrimaryText, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                 Text(
-                    "${groups.firstOrNull { it.id == machine.groupId }?.name ?: "未分组"} · 容量 ${machine.configuration.capacity} · ${if (machine.operational) "运行中" else "已停止"}",
+                    "${groups.firstOrNull { it.id == machine.groupId }?.name ?: "未分组"}·容量 ${machine.configuration.capacity}·${if (machine.operational) "运行中" else "已停止"}",
                     color = if (machine.operational) SecondaryText else Destructive,
                     style = MaterialTheme.typography.labelSmall
                 )

@@ -32,6 +32,7 @@ MAX_ESTIMATED_WAIT_MINUTES = (
 )
 MAX_EVENT_REGISTRATION_IDS = MAX_REGISTRATIONS_PER_MACHINE * MAX_MACHINE_COUNT
 MAX_PLAYER_PROFILES = 500
+MAX_RECENT_PLAYER_USAGE_EVENTS = 16
 MAX_EVENTS_PER_SNAPSHOT = 200
 MAX_PRIVATE_CONTACTS = (
     MAX_REGISTRATIONS_PER_MACHINE * MAX_MACHINE_COUNT + MAX_EVENTS_PER_SNAPSHOT * 2
@@ -631,10 +632,10 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         CORS_ORIGIN=configured_cors_origin,
         PUBLIC_SITE_URL=configured_public_site_url.rstrip("/"),
         LATEST_TERMINAL_VERSION=os.getenv(
-            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.3"
+            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.4"
         ),
         LATEST_WEBSITE_VERSION=os.getenv(
-            "QUEUE_LATEST_WEBSITE_VERSION", "0.13.3"
+            "QUEUE_LATEST_WEBSITE_VERSION", "0.13.4"
         ),
         LATEST_BOT_VERSION=os.getenv("QUEUE_LATEST_BOT_VERSION", "0.3.13"),
         MAX_CONTENT_LENGTH=MAX_AVATAR_REQUEST_BYTES,
@@ -896,6 +897,7 @@ def initialize_database(database_path: str, *, profile_scope_id: str = "default"
                 qq_number TEXT,
                 usage_count INTEGER NOT NULL,
                 last_used_at INTEGER,
+                recent_usage_at TEXT NOT NULL DEFAULT '[]',
                 qq_visibility TEXT NOT NULL DEFAULT 'TERMINAL_ONLY',
                 notification_enabled INTEGER NOT NULL DEFAULT 1,
                 notify_queue_changes INTEGER NOT NULL DEFAULT 1,
@@ -937,6 +939,7 @@ def initialize_database(database_path: str, *, profile_scope_id: str = "default"
             ("terminal_editing_allowed", "INTEGER NOT NULL DEFAULT 1"),
             ("visited_venues_public", "INTEGER NOT NULL DEFAULT 1"),
             ("web_profile_revision", "INTEGER NOT NULL DEFAULT 0"),
+            ("recent_usage_at", "TEXT NOT NULL DEFAULT '[]'"),
         ):
             if column_name not in player_profile_columns:
                 connection.execute(
@@ -4667,7 +4670,7 @@ def upsert_player_profiles(
             SELECT profile_revision, profile_updated_at, public_player_id,
                    avatar_reference,
                    nickname, gender, default_preference, qq_number,
-                   usage_count, last_used_at, qq_visibility,
+                   usage_count, last_used_at, recent_usage_at, qq_visibility,
                    notification_enabled, notify_queue_changes,
                    notify_playing_position, notify_online_check_in,
                    notify_absence, notify_machine_status, setup_version,
@@ -4702,6 +4705,15 @@ def upsert_player_profiles(
                 profile_id=profile["profile_id"],
             )
         if current is not None:
+            profile = {
+                **profile,
+                "recent_usage_at": merge_recent_usage_history(
+                    profile["recent_usage_at"],
+                    current["recent_usage_at"],
+                    profile["last_used_at"],
+                    current["last_used_at"],
+                ),
+            }
             protected_values_changed = False
             if current["web_account_bound"]:
                 incoming_web_revision = profile.get("web_profile_revision", 0)
@@ -4822,6 +4834,8 @@ def upsert_player_profiles(
                             or profile["last_used_at"] > current["last_used_at"]
                         )
                     )
+                    or encode_recent_usage_history(profile["recent_usage_at"])
+                    != current["recent_usage_at"]
                 )
                 if not operational_values_changed:
                     continue
@@ -4946,7 +4960,7 @@ def upsert_player_profiles(
             """
             INSERT INTO player_profile
                 (device_id, profile_id, nickname, gender, default_preference,
-                 qq_number, usage_count, last_used_at, qq_visibility,
+                 qq_number, usage_count, last_used_at, recent_usage_at, qq_visibility,
                  notification_enabled, notify_queue_changes,
                  notify_playing_position, notify_online_check_in,
                  notify_absence, notify_machine_status, setup_version,
@@ -4954,7 +4968,7 @@ def upsert_player_profiles(
                  public_player_id, avatar_reference, web_account_bound,
                  terminal_editing_allowed,
                  visited_venues_public, web_profile_revision, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, profile_id) DO UPDATE SET
                 nickname = excluded.nickname,
                 gender = excluded.gender,
@@ -4962,6 +4976,7 @@ def upsert_player_profiles(
                 qq_number = excluded.qq_number,
                 usage_count = excluded.usage_count,
                 last_used_at = excluded.last_used_at,
+                recent_usage_at = excluded.recent_usage_at,
                 qq_visibility = excluded.qq_visibility,
                 notification_enabled = excluded.notification_enabled,
                 notify_queue_changes = excluded.notify_queue_changes,
@@ -4997,6 +5012,7 @@ def upsert_player_profiles(
                 qq_number,
                 profile["usage_count"],
                 profile["last_used_at"],
+                encode_recent_usage_history(profile["recent_usage_at"]),
                 profile["qq_visibility"],
                 int(profile["notification_enabled"]),
                 int(profile["notify_queue_changes"]),
@@ -6022,7 +6038,7 @@ def read_synced_profiles(*, allow_qq_filter: bool):
         rows = connection.execute(
             """
             SELECT profile_id, nickname, gender, default_preference, qq_number,
-                   usage_count, last_used_at, qq_visibility,
+                   usage_count, last_used_at, recent_usage_at, qq_visibility,
                    notification_enabled, notify_queue_changes,
                    notify_playing_position, notify_online_check_in,
                    notify_absence, notify_machine_status, setup_version,
@@ -6086,6 +6102,9 @@ def read_synced_profiles(*, allow_qq_filter: bool):
                     "qq_number": row["qq_number"],
                     "usage_count": row["usage_count"],
                     "last_used_at": row["last_used_at"],
+                    "recent_usage_at": decode_recent_usage_history(
+                        row["recent_usage_at"]
+                    ),
                     "qq_visibility": row["qq_visibility"],
                     "notification_enabled": bool(row["notification_enabled"]),
                     "notify_queue_changes": bool(row["notify_queue_changes"]),
@@ -11246,6 +11265,11 @@ def normalize_private_profiles(
             terminal_editing_allowed = True
             visited_venues_public = True
             web_profile_revision = 0
+        last_used_at = read_optional_integer(value, "last_used_at", minimum=1)
+        recent_usage_at = normalize_recent_usage_history(
+            value.get("recent_usage_at") if "recent_usage_at" in value else None,
+            last_used_at=last_used_at,
+        )
         profiles.append(
             {
                 "profile_id": read_uuid(value, "profile_id"),
@@ -11258,9 +11282,8 @@ def normalize_private_profiles(
                 "usage_count": read_integer(
                     value, "usage_count", minimum=0, maximum=2**31 - 1
                 ),
-                "last_used_at": read_optional_integer(
-                    value, "last_used_at", minimum=1
-                ),
+                "last_used_at": last_used_at,
+                "recent_usage_at": recent_usage_at,
                 "qq_visibility": qq_visibility,
                 "notification_enabled": notification_enabled,
                 "notify_queue_changes": notify_queue_changes,
@@ -11291,6 +11314,68 @@ def normalize_private_profiles(
     if len(qq_numbers) != len(set(qq_numbers)):
         raise ValidationError("玩家资料 QQ 号不能重复")
     return profiles
+
+
+def normalize_recent_usage_history(
+    source: Any, *, last_used_at: int | None
+) -> list[int] | None:
+    if source is None:
+        return None
+    if not isinstance(source, list):
+        raise ValidationError("玩家资料近期使用记录必须是数组")
+    if len(source) > MAX_RECENT_PLAYER_USAGE_EVENTS:
+        raise ValidationError("玩家资料近期使用记录数量超过限制")
+    timestamps = [
+        read_integer(
+            {"used_at": value},
+            "used_at",
+            minimum=1,
+            maximum=2**63 - 1,
+        )
+        for value in source
+    ]
+    if last_used_at is not None:
+        timestamps.append(last_used_at)
+    return sorted(set(timestamps))[-MAX_RECENT_PLAYER_USAGE_EVENTS:]
+
+
+def decode_recent_usage_history(source: Any) -> list[int]:
+    try:
+        decoded = json.loads(source) if isinstance(source, str) else source
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return sorted(
+        {
+            value
+            for value in decoded
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0
+        }
+    )[-MAX_RECENT_PLAYER_USAGE_EVENTS:]
+
+
+def merge_recent_usage_history(
+    incoming: list[int] | None,
+    stored: Any,
+    incoming_last_used_at: int | None,
+    stored_last_used_at: int | None,
+) -> list[int]:
+    timestamps = decode_recent_usage_history(stored)
+    if incoming is None:
+        # Older terminals do not send a history field. Preserve the already
+        # stored history without manufacturing a new operational change from
+        # last_used_at on every legacy snapshot.
+        return timestamps
+    timestamps.extend(incoming)
+    for last_used_at in (incoming_last_used_at, stored_last_used_at):
+        if last_used_at is not None and last_used_at > 0:
+            timestamps.append(last_used_at)
+    return sorted(set(timestamps))[-MAX_RECENT_PLAYER_USAGE_EVENTS:]
+
+
+def encode_recent_usage_history(timestamps: list[int] | None) -> str:
+    return json.dumps(timestamps or [], separators=(",", ":"))
 
 
 def normalize_submitted_venue(source: Any) -> dict[str, Any] | None:

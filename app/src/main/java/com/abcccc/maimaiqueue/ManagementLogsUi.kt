@@ -169,7 +169,7 @@ private fun ManagementLogCard(log: ManagementLogEntry) {
             if (log.machineName != null || log.machineId != null) {
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    listOfNotNull(log.machineName, log.machineId?.let { "机台 $it" }).joinToString(" · "),
+                    listOfNotNull(log.machineName, log.machineId?.let { "机台 $it" }).joinToString("·"),
                     color = SecondaryText,
                     style = MaterialTheme.typography.labelSmall
                 )

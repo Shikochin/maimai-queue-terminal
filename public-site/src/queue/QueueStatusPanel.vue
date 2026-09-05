@@ -45,14 +45,14 @@ const DEFAULT_MACHINE_GROUP_ID = '00000000000000000000000000000001'
 const defaultMachineDefinitions = SUPPORTED_MACHINE_IDS.map((id, index) => ({
   id,
   name: index === 0
-    ? '左侧 · 机台 A'
+    ? '左侧·机台 A'
     : index === 1
-      ? '右侧 · 机台 B'
+      ? '右侧·机台 B'
       : index === 2
-        ? '中间左侧 · 机台 C'
+        ? '中间左侧·机台 C'
         : index === 3
-           ? '中间右侧 · 机台 D'
-           : `第 ${index + 1} 台 · 机台 ${id}`
+           ? '中间右侧·机台 D'
+           : `第 ${index + 1} 台·机台 ${id}`
 }))
 const logSourceDefinitions = [
   { value: 'ALL', label: '全部来源' },
@@ -1490,7 +1490,7 @@ function positionLabel(machine, position, index) {
 function absenceLabel(registration) {
   if (registration.temporarilyAway) {
     return registration.temporaryAwaySkippedTurns > 0
-      ? `暂时离开 · 已轮空 ${registration.temporaryAwaySkippedTurns} 次`
+      ? `暂时离开·已轮空 ${registration.temporaryAwaySkippedTurns} 次`
       : '暂时离开'
   }
   if (registration.deferredOnce) return '暂缓一次'
@@ -1498,7 +1498,7 @@ function absenceLabel(registration) {
 }
 
 function registrationLabel(registration) {
-  return (registration.onlineRegistrationPendingCheckIn ? '线上登记 · 待签到' : null) ||
+  return (registration.onlineRegistrationPendingCheckIn ? '线上登记·待签到' : null) ||
     absenceLabel(registration) ||
     (registration.noShowCount > 0 ? `未到场 ${registration.noShowCount} 次` : null) ||
     (registration.fixedPair ? '固定组合' : null) ||
@@ -1551,8 +1551,8 @@ function registrationPartnerText(detail) {
 function noShowResultLabel(registration) {
   if (!registration.noShowCount) return null
   return registration.lastNoShowActionWasDefer
-    ? `未到场 ${registration.noShowCount} 次 · 上次处理：暂缓一次`
-    : `未到场 ${registration.noShowCount} 次 · 上次处理：移至队尾`
+    ? `未到场 ${registration.noShowCount} 次·上次处理：暂缓一次`
+    : `未到场 ${registration.noShowCount} 次·上次处理：移至队尾`
 }
 
 function fullTimeText(value, fallback = '尚无记录') {
@@ -2012,9 +2012,9 @@ function eventTypeLabel(type) {
     REGISTRATION_UPDATED: '登记变动',
     QUEUE_REORDERED: '顺序调整',
     PLAYING_CHANGED: '游玩位置',
-     NO_SHOW_DEFERRED: '未到场 · 暂缓一次',
-     NO_SHOW_MOVED_TO_TAIL: '未到场 · 移至队尾',
-     NO_SHOW_REMOVED: '未到场 · 移除登记',
+     NO_SHOW_DEFERRED: '未到场·暂缓一次',
+     NO_SHOW_MOVED_TO_TAIL: '未到场·移至队尾',
+     NO_SHOW_REMOVED: '未到场·移除登记',
     TEMPORARY_AWAY_EXPIRED: '暂时离开期满退出',
     ONLINE_REGISTRATION_ADDED: '线上登记',
     ONLINE_CHECK_IN_COMPLETED: '现场签到',
@@ -2693,7 +2693,7 @@ onBeforeUnmount(() => {
         <p>
           <span>{{ machineCountSummary }}</span>
           <template v-if="hasSnapshot">
-            <span class="queue-heading-separator" aria-hidden="true">·</span>
+            <span class="queue-heading-separator" aria-hidden="true"></span>
             <strong>当前共 {{ totalRegistrationCount }} 个登记</strong>
           </template>
         </p>
@@ -3273,7 +3273,7 @@ onBeforeUnmount(() => {
                 <TriangleAlert :size="18" aria-hidden="true" />
                 <p>
                   <strong>须在 30 分钟内完成签到</strong>
-                  <span>登记加入后会显示为“线上登记 · 待签到”。请到现场终端点击自己的登记并选择“已到场”。超过 30 分钟，或轮到进入游玩位置时仍未签到，登记会自动退出排队。</span>
+                  <span>登记加入后会显示为“线上登记·待签到”。请到现场终端点击自己的登记并选择“已到场”。超过 30 分钟，或轮到进入游玩位置时仍未签到，登记会自动退出排队。</span>
                   <span v-if="!onlineJoinProfile.setupComplete">这份玩家资料尚未补全通知偏好和 QQ 显示范围。线上登记可以先创建，但到场后须先在终端补全资料，才能签到。</span>
                 </p>
               </div>
@@ -3426,7 +3426,7 @@ onBeforeUnmount(() => {
               <div class="queue-detail-pills">
                 <span>{{ selectedDetail.registrations.length }} 个登记</span>
                 <span v-if="!selectedDetail.machine.operational">
-                  机台已停止使用 · {{ stopReasonLabel(
+                  机台已停止使用·{{ stopReasonLabel(
                     selectedDetail.machine.stopReason,
                     selectedDetail.machine.stopReasonDetail
                   ) }}
@@ -3461,7 +3461,7 @@ onBeforeUnmount(() => {
             <template v-else>
               <div class="queue-detail-pills">
                 <span v-if="selectedDetail.registration.onlineRegistrationPendingCheckIn" class="is-online">
-                  线上登记 · 待签到
+                  线上登记·待签到
                 </span>
                 <span :class="{ 'is-absence': absenceLabel(selectedDetail.registration) }">
                   {{ absenceLabel(selectedDetail.registration) || preferenceLabel(selectedDetail.registration) }}
@@ -3508,7 +3508,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div v-if="!selectedDetail.machine.operational">
                   <dt>机台状态</dt>
-                  <dd>停止使用 · {{ stopReasonLabel(
+                  <dd>停止使用·{{ stopReasonLabel(
                     selectedDetail.machine.stopReason,
                     selectedDetail.machine.stopReasonDetail
                   ) }}</dd>
@@ -3737,7 +3737,7 @@ button { font: inherit; letter-spacing: 0; -webkit-tap-highlight-color: transpar
 .queue-heading h1 { margin: 0; border: 0; font-size: 34px; font-weight: 660; line-height: 1.15; letter-spacing: 0; }
 .queue-heading p { display: flex; margin: 7px 0 0; flex-wrap: wrap; gap: 0; color: var(--queue-secondary); font-size: 13px; line-height: 1.55; }
 .queue-heading strong { color: var(--queue-text); font-weight: 560; }
-.queue-heading-separator { display: inline-flex; width: 1em; flex: 0 0 1em; justify-content: center; color: var(--queue-tertiary); }
+.queue-heading-separator { display: inline-block; width: .24em; height: .24em; margin: .655em .38em; flex: 0 0 .24em; border-radius: 50%; background: var(--queue-tertiary); }
 .queue-toolbar { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
 .queue-view-tabs { display: grid; width: 100%; padding: 3px; grid-template-columns: 1fr 1fr; border-radius: 10px; background: color-mix(in srgb, var(--queue-separator) 42%, transparent); }
 .queue-view-tabs button { display: flex; min-height: 36px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 8px; color: var(--queue-secondary); background: transparent; cursor: pointer; font-size: 12px; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }

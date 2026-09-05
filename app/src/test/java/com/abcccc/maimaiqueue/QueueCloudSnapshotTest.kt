@@ -17,6 +17,8 @@ class QueueCloudSnapshotTest {
             nickname = "测试玩家",
             gender = PlayerGender.UNDISCLOSED,
             defaultPreference = ProfilePlayPreference.SOLO,
+            lastUsedAtMillis = 90L,
+            recentUsageAtMillis = listOf(70L, 80L, 90L),
             createdAtMillis = 100L,
             updatedAtMillis = 100L
         )
@@ -40,15 +42,27 @@ class QueueCloudSnapshotTest {
         assertFalse(snapshot.has("venue"))
         assertFalse(terminal.has("name"))
         assertFalse(serializedProfile.has("public_player_id"))
+        assertFalse(serializedProfile.has("recent_usage_at"))
     }
 
     @Test
     fun schemaEightSnapshotIncludesInstallationIdentity() {
         val venueId = "00000000-0000-0000-0000-000000000222"
+        val profile = PlayerProfile(
+            id = "00000000-0000-0000-0000-000000000111",
+            nickname = "测试玩家",
+            gender = PlayerGender.UNDISCLOSED,
+            defaultPreference = ProfilePlayPreference.SOLO,
+            lastUsedAtMillis = 90L,
+            recentUsageAtMillis = listOf(70L, 80L, 90L),
+            createdAtMillis = 50L,
+            updatedAtMillis = 100L
+        )
         val snapshot = buildQueueSyncSnapshot(
             state = state(),
             terminalId = "terminal-1",
             capturedAtMillis = 1_000L,
+            playerProfiles = listOf(profile),
             schemaVersion = 8,
             venueId = venueId,
             terminalName = "入口终端"
@@ -56,6 +70,10 @@ class QueueCloudSnapshotTest {
 
         assertEquals(venueId, snapshot.getJSONObject("venue").getString("id"))
         assertEquals("入口终端", snapshot.getJSONObject("terminal").getString("name"))
+        val recentUsage = snapshot.getJSONArray("private_player_profiles")
+            .getJSONObject(0)
+            .getJSONArray("recent_usage_at")
+        assertEquals(listOf(70L, 80L, 90L), List(recentUsage.length()) { recentUsage.getLong(it) })
     }
 
     @Test

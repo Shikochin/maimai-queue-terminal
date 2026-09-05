@@ -1260,6 +1260,69 @@ class QueueStatusApiTest(unittest.TestCase):
         self.assertEqual("Bot 修改昵称", stored["nickname"])
         self.assertFalse(stored["notify_queue_changes"])
 
+    def test_recent_player_usage_history_round_trips_and_legacy_updates_preserve_it(self):
+        snapshot = self.remote_ready_snapshot(revision=4)
+        self.upgrade_snapshot_to_schema_v7(snapshot)
+        snapshot["schema_version"] = 8
+        snapshot["venue"] = {
+            "id": self.client.get(
+                "/api/queue-terminal/installation", headers=self.headers
+            ).get_json()["venue"]["id"]
+        }
+        profile = snapshot["private_player_profiles"][0]
+        profile["recent_usage_at"] = [700_000, 850_000, 900_000]
+        headers = self.schema_eight_terminal_headers()
+
+        self.assertEqual(
+            204,
+            self.client.post(
+                "/api/queue-status", json=snapshot, headers=headers
+            ).status_code,
+        )
+        synced = self.client.get(
+            "/api/queue-terminal/profiles", headers=headers
+        ).get_json()["profiles"][0]
+        self.assertEqual([700_000, 850_000, 900_000], synced["recent_usage_at"])
+
+        legacy_update = copy.deepcopy(snapshot)
+        legacy_update["revision"] = 5
+        legacy_profile = legacy_update["private_player_profiles"][0]
+        legacy_profile.pop("recent_usage_at")
+        legacy_profile["profile_revision"] += 1
+        legacy_profile["updated_at"] += 1
+        self.assertEqual(
+            204,
+            self.client.post(
+                "/api/queue-status", json=legacy_update, headers=headers
+            ).status_code,
+        )
+        preserved = self.client.get(
+            "/api/queue-terminal/profiles", headers=headers
+        ).get_json()["profiles"][0]
+        self.assertEqual([700_000, 850_000, 900_000], preserved["recent_usage_at"])
+
+    def test_recent_player_usage_history_is_bounded_and_validated(self):
+        snapshot = self.remote_ready_snapshot(revision=4)
+        self.upgrade_snapshot_to_schema_v7(snapshot)
+        snapshot["schema_version"] = 8
+        snapshot["venue"] = {
+            "id": self.client.get(
+                "/api/queue-terminal/installation", headers=self.headers
+            ).get_json()["venue"]["id"]
+        }
+        headers = self.schema_eight_terminal_headers()
+
+        for invalid_history in ([1] * 17, "900000", [0]):
+            with self.subTest(invalid_history=invalid_history):
+                invalid = copy.deepcopy(snapshot)
+                invalid["private_player_profiles"][0][
+                    "recent_usage_at"
+                ] = invalid_history
+                response = self.client.post(
+                    "/api/queue-status", json=invalid, headers=headers
+                )
+                self.assertEqual(400, response.status_code)
+
     def test_schema_eight_private_terminal_routes_require_the_active_venue(self):
         snapshot = self.remote_ready_snapshot(revision=4)
         self.assertEqual(
@@ -7168,14 +7231,14 @@ class QueueStatusApiTest(unittest.TestCase):
             {
                 "name": "现场终端",
                 "current_version": "0.10.0",
-                "latest_version": "0.13.3",
+                "latest_version": "0.13.4",
                 "status": "UPDATE_AVAILABLE",
                 "updated_at": 1_234_000,
             },
             payload["components"]["terminal"],
         )
         self.assertEqual(
-            "0.13.3", payload["components"]["website"]["latest_version"]
+            "0.13.4", payload["components"]["website"]["latest_version"]
         )
         self.assertEqual(
             "UPDATE_AVAILABLE", payload["components"]["website"]["status"]

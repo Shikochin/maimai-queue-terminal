@@ -1084,6 +1084,18 @@ private fun parseSyncedPlayerProfile(source: JSONObject?): PlayerProfile? {
             } else {
                 source.getLong("last_used_at")
             },
+            recentUsageAtMillis = normalizeRecentUsageTimestamps(
+                source.optJSONArray("recent_usage_at")?.let { timestamps ->
+                    buildList {
+                        repeat(timestamps.length()) { timestampIndex ->
+                            timestamps.optLong(timestampIndex, 0L)
+                                .takeIf { it > 0L }
+                                ?.let(::add)
+                        }
+                    }
+                }.orEmpty(),
+                if (source.isNull("last_used_at")) null else source.getLong("last_used_at")
+            ),
             qqVisibility = QqVisibility.valueOf(
                 source.optString("qq_visibility", QqVisibility.TERMINAL_ONLY.name)
             ),
@@ -2215,6 +2227,17 @@ internal fun buildQueueSyncSnapshot(
                         )
                         put("usage_count", profile.usageCount)
                         put("last_used_at", profile.lastUsedAtMillis ?: JSONObject.NULL)
+                        if (schemaVersion >= 8) {
+                            put(
+                                "recent_usage_at",
+                                JSONArray(
+                                    normalizeRecentUsageTimestamps(
+                                        profile.recentUsageAtMillis,
+                                        profile.lastUsedAtMillis
+                                    )
+                                )
+                            )
+                        }
                         put("qq_visibility", profile.qqVisibility.name)
                         put("notification_enabled", profile.notificationPreferences.enabled)
                         put(
@@ -2313,6 +2336,10 @@ internal fun playerProfilesForCloudSync(profiles: List<PlayerProfile>): List<Pla
             qqNumber = profile.normalizedQqNumber()?.takeIf(::isValidQqNumber),
             usageCount = profile.usageCount.coerceAtLeast(0),
             lastUsedAtMillis = profile.lastUsedAtMillis?.takeIf { it > 0L },
+            recentUsageAtMillis = normalizeRecentUsageTimestamps(
+                profile.recentUsageAtMillis,
+                profile.lastUsedAtMillis
+            ),
             setupVersion = profile.setupVersion.coerceAtLeast(0),
             revision = profile.revision.coerceAtLeast(1L),
             createdAtMillis = profile.createdAtMillis.coerceAtLeast(1L),

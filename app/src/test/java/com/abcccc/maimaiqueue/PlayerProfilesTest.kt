@@ -33,6 +33,8 @@ class PlayerProfilesTest {
         nickname: String,
         usageCount: Int = 0,
         lastUsedAtMillis: Long? = null,
+        recentUsageAtMillis: List<Long> = emptyList(),
+        createdAtMillis: Long = 100L,
         preference: ProfilePlayPreference = ProfilePlayPreference.OPEN_TO_JOIN,
         qqNumber: String? = null
     ) = PlayerProfile(
@@ -43,7 +45,8 @@ class PlayerProfilesTest {
         qqNumber = qqNumber,
         usageCount = usageCount,
         lastUsedAtMillis = lastUsedAtMillis,
-        createdAtMillis = 100L,
+        recentUsageAtMillis = recentUsageAtMillis,
+        createdAtMillis = createdAtMillis,
         updatedAtMillis = 100L
     )
 
@@ -115,16 +118,122 @@ class PlayerProfilesTest {
     }
 
     @Test
-    fun recommendedSortUsesFrequencyThenMostRecentUsage() {
+    fun recentFrequencyOutranksLargeHistoricalUsageCount() {
+        val now = 200L * DAY
         val profiles = listOf(
-            profile("1", "陈一", usageCount = 2, lastUsedAtMillis = 500L),
-            profile("2", "陈二", usageCount = 5, lastUsedAtMillis = 300L),
-            profile("3", "陈三", usageCount = 5, lastUsedAtMillis = 900L)
+            profile(
+                "historical",
+                "旧常客",
+                usageCount = 2_000,
+                lastUsedAtMillis = now - 180L * DAY,
+                recentUsageAtMillis = listOf(now - 180L * DAY)
+            ),
+            profile(
+                "active",
+                "近期玩家",
+                usageCount = 8,
+                lastUsedAtMillis = now - DAY,
+                recentUsageAtMillis = listOf(
+                    now - 8L * DAY,
+                    now - 4L * DAY,
+                    now - DAY
+                )
+            )
         )
 
-        val sorted = filterAndSortPlayerProfiles(profiles, "", ProfileSortMode.RECOMMENDED)
+        val sorted = filterAndSortPlayerProfiles(
+            profiles,
+            "",
+            ProfileSortMode.RECOMMENDED,
+            nowMillis = now
+        )
 
-        assertEquals(listOf("3", "2", "1"), sorted.map { it.id })
+        assertEquals(listOf("active", "historical"), sorted.map { it.id })
+    }
+
+    @Test
+    fun repeatedRecentUsageOutranksOneEquallyRecentVisit() {
+        val now = 200L * DAY
+        val repeated = profile(
+            "repeated",
+            "近期常来",
+            usageCount = 4,
+            lastUsedAtMillis = now - DAY,
+            recentUsageAtMillis = listOf(now - 6L * DAY, now - 3L * DAY, now - DAY)
+        )
+        val oneVisit = profile(
+            "single",
+            "只来一次",
+            usageCount = 30,
+            lastUsedAtMillis = now - DAY,
+            recentUsageAtMillis = listOf(now - DAY)
+        )
+
+        val sorted = filterAndSortPlayerProfiles(
+            listOf(oneVisit, repeated),
+            "",
+            ProfileSortMode.RECOMMENDED,
+            nowMillis = now
+        )
+
+        assertEquals(listOf("repeated", "single"), sorted.map { it.id })
+    }
+
+    @Test
+    fun newlyCreatedProfileGetsTemporaryDiscoveryBoost() {
+        val now = 200L * DAY
+        val established = profile(
+            "established",
+            "已有玩家",
+            usageCount = 2,
+            lastUsedAtMillis = now - 20L * DAY,
+            recentUsageAtMillis = listOf(now - 20L * DAY),
+            createdAtMillis = now - 100L * DAY
+        )
+        val newProfile = profile(
+            "new",
+            "新玩家",
+            createdAtMillis = now - DAY
+        )
+
+        val whileNew = filterAndSortPlayerProfiles(
+            listOf(established, newProfile),
+            "",
+            ProfileSortMode.RECOMMENDED,
+            nowMillis = now
+        )
+        val afterBoostExpires = filterAndSortPlayerProfiles(
+            listOf(established, newProfile),
+            "",
+            ProfileSortMode.RECOMMENDED,
+            nowMillis = now + 20L * DAY
+        )
+
+        assertEquals("new", whileNew.first().id)
+        assertEquals("established", afterBoostExpires.first().id)
+    }
+
+    @Test
+    fun exactSearchMatchStaysAheadOfHigherRecommendationScore() {
+        val now = 200L * DAY
+        val exact = profile("exact", "Rin", createdAtMillis = now - 100L * DAY)
+        val popularSubstring = profile(
+            "popular",
+            "RinRin",
+            usageCount = 100,
+            lastUsedAtMillis = now,
+            recentUsageAtMillis = List(10) { now - it * DAY },
+            createdAtMillis = now - 100L * DAY
+        )
+
+        val result = filterAndSortPlayerProfiles(
+            listOf(popularSubstring, exact),
+            "rin",
+            ProfileSortMode.RECOMMENDED,
+            nowMillis = now
+        )
+
+        assertEquals(listOf("exact", "popular"), result.map { it.id })
     }
 
     @Test
@@ -167,7 +276,50 @@ class PlayerProfilesTest {
 
         assertEquals(5, updated.usageCount)
         assertEquals(800L, updated.lastUsedAtMillis)
+        assertEquals(listOf(200L, 800L), updated.recentUsageAtMillis)
         assertEquals(800L, updated.updatedAtMillis)
+    }
+
+    @Test
+    fun recordingUsageKeepsOnlyTheNewestBoundedHistory() {
+        val original = profile(
+            "1",
+            "小雨",
+            recentUsageAtMillis = (1L..MAX_RECENT_PLAYER_USAGE_EVENTS.toLong()).toList(),
+            lastUsedAtMillis = MAX_RECENT_PLAYER_USAGE_EVENTS.toLong()
+        )
+
+        val updated = original.recordUsage(MAX_RECENT_PLAYER_USAGE_EVENTS + 1L)
+
+        assertEquals(MAX_RECENT_PLAYER_USAGE_EVENTS, updated.recentUsageAtMillis.size)
+        assertEquals(2L, updated.recentUsageAtMillis.first())
+        assertEquals(MAX_RECENT_PLAYER_USAGE_EVENTS + 1L, updated.recentUsageAtMillis.last())
+    }
+
+    @Test
+    fun futureTimestampsAreClampedInsteadOfReceivingUnboundedScores() {
+        val now = 200L * DAY
+        val current = profile(
+            "current",
+            "当前时间",
+            usageCount = 1,
+            lastUsedAtMillis = now,
+            recentUsageAtMillis = listOf(now),
+            createdAtMillis = now
+        )
+        val future = current.copy(
+            id = "future",
+            nickname = "未来时间",
+            lastUsedAtMillis = Long.MAX_VALUE,
+            recentUsageAtMillis = listOf(Long.MAX_VALUE),
+            createdAtMillis = Long.MAX_VALUE
+        )
+
+        assertEquals(
+            playerProfileRecommendationScore(current, now),
+            playerProfileRecommendationScore(future, now),
+            0.0
+        )
     }
 
     @Test
@@ -251,5 +403,9 @@ class PlayerProfilesTest {
         assertEquals(PlayerGender.FEMALE, registration.gender)
         assertEquals("profile-1", registration.playerProfileId)
         assertTrue(!registration.isTemporary)
+    }
+
+    private companion object {
+        const val DAY = 24L * 60L * 60L * 1_000L
     }
 }

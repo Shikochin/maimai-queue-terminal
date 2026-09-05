@@ -1,6 +1,6 @@
 # maimai Q
 
-[![Version](https://img.shields.io/badge/version-0.13.3-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
+[![Version](https://img.shields.io/badge/version-0.13.4-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
 [![Android](https://img.shields.io/badge/Android-10%2B-34C759?logo=android&logoColor=white)](https://developer.android.com/about/versions/10)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-007AFF)](https://developer.android.com/compose)
@@ -17,8 +17,9 @@
 - [独立公开队列页说明](public-site/README.md)
 - [玩家使用手册](docs/user-manual.md)
 - [玩家使用手册 PDF](output/pdf/maimai-Q-玩家使用手册.pdf)
-- [0.1.0 至 0.13.3 更新日志](docs/update.md)
+- [0.1.0 至 0.13.4 更新日志](docs/update.md)
 - [0.13.3 网页登录与二维码建档说明](docs/releases/0.13.3-player-profile-creation.md)
+- [0.13.4 网页与玩家资料推荐修复说明](docs/releases/0.13.4-recommendation-and-web-fixes.md)
 - [0.13.2 自定义头像与管理后台收尾说明](docs/releases/0.13.2-avatar-management.md)
 - [0.13.1 现场终端补丁发布说明](docs/releases/0.13.1-terminal-profile-edit.md)
 - [0.13.0 管理后台发布说明](docs/releases/0.13.0-management-app.md)
@@ -220,7 +221,7 @@ app/build/outputs/apk/local/debug/app-local-debug.apk
 .\gradlew.bat :app:packageLocalDebugApk
 ```
 
-文件会复制到 `output/apk/maimai-Q-0.13.3-local.apk`。
+文件会复制到 `output/apk/maimai-Q-0.13.4-local.apk`。
 
 macOS 或 Linux 使用：
 
@@ -269,7 +270,7 @@ $signedApk = 'app\build\outputs\apk\local\release\app-local-release-signed.apk'
 & '<Android SDK>\build-tools\<已安装版本>\apksigner.bat' verify --verbose --print-certs $signedApk
 ```
 
-公开渠道只能上传已经验证签名的 Release APK。`localRelease` 是完全离线版；自建服务端的测试者还需要下文所述、不含预置地址和令牌的公开 `terminalRelease`。禁止上传 Debug、未签名 APK，或任何预置了机厅私有连接信息的终端包。0.13.3 的公开 APK 使用既有长期证书签名，证书 SHA-256 指纹为 `daa2e919d2f8d956c0a93417aae601e6ec658edc5ae7c9673830c53f649ec925`。
+公开渠道只能上传已经验证签名的 Release APK。`localRelease` 是完全离线版；自建服务端的测试者还需要下文所述、不含预置地址和令牌的公开 `terminalRelease`。禁止上传 Debug、未签名 APK，或任何预置了机厅私有连接信息的终端包。0.13.4 的公开 APK 使用既有长期证书签名，证书 SHA-256 指纹为 `daa2e919d2f8d956c0a93417aae601e6ec658edc5ae7c9673830c53f649ec925`。
 
 ### 配置与服务端同步
 
@@ -308,7 +309,7 @@ QUEUE_SYNC_TOKEN=<与服务器一致的高强度随机令牌>
 
 签名后还应检查其应用 ID 为 `com.abcccc.maimaiqueue`、包含联网权限、不是 Debug 构建，并确认 APK 中没有任何实际域名或令牌。
 
-现场终端文件会复制到 `output/apk/maimai-Q-0.13.3-terminal.apk`。只有不含预置连接信息且经过正式签名和校验的构建，才可以作为 GitHub 公开 Release 附件。
+现场终端文件会复制到 `output/apk/maimai-Q-0.13.4-terminal.apk`。只有不含预置连接信息且经过正式签名和校验的构建，才可以作为 GitHub 公开 Release 附件。
 
 ### 管理后台构建
 
@@ -414,7 +415,7 @@ maimai-queue-terminal/
 - 网页登录先查询 QQ 是否已绑定，再显示密码；忘记密码需要联系现场管理员核验，网页不提供仅凭 QQ 的自助重置。仓库没有包含可公开使用的生产同步令牌或正式签名密钥。
 - 公开测试部署不会预置维护者的服务地址；部署者必须自行配置后端、网站、Bot 和终端连接。GitHub Release 只提供经过长期 Release 证书签名并核验的 APK，工作区中的 Debug 或未签名产物不得对外分发。
 
-后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.3 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
+后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.4 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
 
 ## 参与开发
 

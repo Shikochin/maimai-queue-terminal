@@ -46,7 +46,8 @@ class QueueCloudCommandTest {
                 "qq_number": null,
                 "avatar_url": "https://queue.example.test/api/player-avatars/${"a".repeat(64)}.webp",
                 "usage_count": 3,
-                "last_used_at": null,
+                "last_used_at": 300,
+                "recent_usage_at": [100, 200, 300],
                 "qq_visibility": "TERMINAL_ONLY",
                 "notification_enabled": true,
                 "notify_queue_changes": true,
@@ -72,6 +73,7 @@ class QueueCloudCommandTest {
 
         assertEquals(mapOf(validSourceId to canonicalId), parsed.profileAliases)
         assertEquals(canonicalId, parsed.profiles.single().id)
+        assertEquals(listOf(100L, 200L, 300L), parsed.profiles.single().recentUsageAtMillis)
         assertEquals(
             "https://queue.example.test/api/player-avatars/${"a".repeat(64)}.webp",
             parsed.profiles.single().avatarReference

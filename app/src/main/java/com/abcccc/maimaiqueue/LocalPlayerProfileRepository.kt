@@ -149,6 +149,18 @@ class LocalPlayerProfileRepository(context: Context) : PlayerProfileRepository {
                 avatarReference = item.optNullableString("avatarReference"),
                 usageCount = item.optInt("usageCount", 0).coerceAtLeast(0),
                 lastUsedAtMillis = item.optLongOrNull("lastUsedAtMillis"),
+                recentUsageAtMillis = normalizeRecentUsageTimestamps(
+                    item.optJSONArray("recentUsageAtMillis")?.let { timestamps ->
+                        buildList {
+                            repeat(timestamps.length()) { timestampIndex ->
+                                timestamps.optLong(timestampIndex, 0L)
+                                    .takeIf { it > 0L }
+                                    ?.let(::add)
+                            }
+                        }
+                    }.orEmpty(),
+                    item.optLongOrNull("lastUsedAtMillis")
+                ),
                 qqVisibility = enumValueOrDefault(
                     item.optString("qqVisibility"),
                     QqVisibility.TERMINAL_ONLY
@@ -195,6 +207,15 @@ class LocalPlayerProfileRepository(context: Context) : PlayerProfileRepository {
                     put("avatarReference", profile.avatarReference ?: JSONObject.NULL)
                     put("usageCount", profile.usageCount)
                     put("lastUsedAtMillis", profile.lastUsedAtMillis ?: JSONObject.NULL)
+                    put(
+                        "recentUsageAtMillis",
+                        JSONArray(
+                            normalizeRecentUsageTimestamps(
+                                profile.recentUsageAtMillis,
+                                profile.lastUsedAtMillis
+                            )
+                        )
+                    )
                     put("qqVisibility", profile.qqVisibility.name)
                     put("notificationEnabled", profile.notificationPreferences.enabled)
                     put("notifyQueueChanges", profile.notificationPreferences.queueChanges)

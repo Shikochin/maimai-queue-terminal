@@ -596,7 +596,7 @@ private fun ManagementTopBar(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val terminalText = overview?.terminalName?.let { "$it · " }.orEmpty() +
+                    val terminalText = overview?.terminalName?.let { "$it·" }.orEmpty() +
                         if (overview?.terminalOnline == true) "现场终端在线" else "现场终端离线"
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -624,7 +624,7 @@ private fun ManagementTopBar(
             }
             overview?.let {
                 Text(
-                    text = "队列 ${it.queueRevision} · ${formatManagementTime(it.receivedAtMillis)}",
+                    text = "队列 ${it.queueRevision}·${formatManagementTime(it.receivedAtMillis)}",
                     modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 9.dp),
                     color = TertiaryText,
                     style = MaterialTheme.typography.labelSmall
@@ -829,7 +829,7 @@ private fun ManagementCreateRegistrationDialog(
                                             listOfNotNull(
                                                 profile.nickname,
                                                 profile.qqNumber?.let { "QQ $it" }
-                                            ).joinToString(" · ")
+                                            ).joinToString("·")
                                         )
                                     },
                                     onClick = {
@@ -989,7 +989,7 @@ private fun ManagementMachineCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(machine.name, color = PrimaryText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        text = if (machine.operational) "运行中 · ${machine.registrationCount} 份登记" else "已停止使用",
+                        text = if (machine.operational) "运行中·${machine.registrationCount} 份登记" else "已停止使用",
                         color = if (machine.operational) SecondaryText else Destructive,
                         style = MaterialTheme.typography.labelMedium
                     )
@@ -1135,7 +1135,7 @@ private fun ManagementMachineCard(
                                     buildString {
                                         append("第 $position 位")
                                         waitingPosition.estimatedWaitMinutes?.let {
-                                            append(" · 预计 $it 分钟")
+                                            append("·预计 $it 分钟")
                                         }
                                     },
                                     color = TertiaryText,
@@ -1522,7 +1522,7 @@ private fun ManagementTransferChooser(
                         onClick = { onSelect(machine) },
                         enabled = machine.registrationCount + registrations.size <= 20,
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("${machine.name} · ${machine.registrationCount} 份登记") }
+                    ) { Text("${machine.name}·${machine.registrationCount} 份登记") }
                 }
             }
         },
@@ -1588,7 +1588,7 @@ private fun ManagementReorderDialog(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        "完整等待位置 · ${position.registrations.size} 份登记",
+                                        "完整等待位置·${position.registrations.size} 份登记",
                                         color = SecondaryText,
                                         style = MaterialTheme.typography.labelSmall
                                     )
@@ -1712,7 +1712,7 @@ private fun ManagementRegistrationRow(
                     if (registration.temporarilyAway) add("暂离")
                 }
                 if (details.isNotEmpty()) {
-                    Text(details.joinToString(" · "), color = SecondaryText, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(details.joinToString("·"), color = SecondaryText, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (registration.pendingCheckIn) {
@@ -1892,7 +1892,7 @@ private fun ManagementRegistrationRow(
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
                             Text(
-                                "${target.name} · ${target.registrationCount} 份登记",
+                                "${target.name}·${target.registrationCount} 份登记",
                                 color = if (selectedTargetMachineId == target.id) {
                                     SystemBlue
                                 } else {
@@ -2132,7 +2132,7 @@ private fun ManagementProfileChooserDialog(
                                     listOfNotNull(
                                         profile.publicPlayerId?.let { "玩家 $it" },
                                         profile.qqNumber?.let { "QQ $it" }
-                                    ).joinToString(" · "),
+                                    ).joinToString("·"),
                                     color = SecondaryText,
                                     style = MaterialTheme.typography.labelSmall
                                 )
@@ -2321,7 +2321,7 @@ private fun ManagementProfilesPage(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(profile.nickname, color = PrimaryText, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                             Text(
-                                text = listOfNotNull(profile.publicPlayerId?.let { "玩家编号 $it" }, profile.qqNumber?.let { "QQ $it" }).joinToString(" · ").ifBlank { "未填写 QQ" },
+                                text = listOfNotNull(profile.publicPlayerId?.let { "玩家编号 $it" }, profile.qqNumber?.let { "QQ $it" }).joinToString("·").ifBlank { "未填写 QQ" },
                                 color = SecondaryText,
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -2332,7 +2332,7 @@ private fun ManagementProfilesPage(
                     Text(
                         text = buildString {
                             append(if (profile.webAccountBound) "网页后台已绑定" else "网页后台未绑定")
-                            append(" · ")
+                            append("·")
                             append(if (profile.terminalEditingAllowed) "终端可编辑" else "终端编辑已锁定")
                         },
                         color = if (profile.terminalEditingAllowed) SecondaryText else AbsenceStatusColor,
@@ -2637,9 +2637,9 @@ private fun ManagementCapabilitiesPage(
                             Text(
                                 if (terminalPolicy.supported) {
                                     if (terminalPolicy.managementAppBound) {
-                                        "管理后台已接管终端设置 · 版本 ${terminalPolicy.revision}"
+                                        "管理后台已接管终端设置·版本 ${terminalPolicy.revision}"
                                     } else {
-                                        "终端支持策略接管 · 当前未绑定"
+                                        "终端支持策略接管·当前未绑定"
                                     }
                                 } else {
                                     "当前终端版本不支持远程策略接管"
