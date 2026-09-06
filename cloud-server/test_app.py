@@ -6785,6 +6785,133 @@ class QueueStatusApiTest(unittest.TestCase):
         self.assertEqual(200, password.status_code)
         self.assertIn("已修改", password.get_json()["detail"])
 
+    def test_management_profile_delete_waits_for_terminal_and_cleans_private_rows(self):
+        snapshot, terminal_headers = self.management_control_snapshot()
+        self.assertEqual(
+            204,
+            self.client.post(
+                "/api/queue-status", json=snapshot, headers=terminal_headers
+            ).status_code,
+        )
+        binding = self.client.post(
+            "/api/queue-terminal/player-bindings",
+            json={"profile_id": self.profile_id},
+            headers=terminal_headers,
+        )
+        self.assertEqual(201, binding.status_code)
+        self.assertEqual(
+            201,
+            self.client.post(
+                f"/api/player-account/bindings/{binding.get_json()['binding_token']}/complete",
+                json={"password": "delete-password"},
+            ).status_code,
+        )
+        overview = self.client.get(
+            "/api/queue-management/overview", headers=self.management_headers
+        ).get_json()
+        profile = next(
+            value for value in overview["profiles"] if value["profile_id"] == self.profile_id
+        )
+        request_body = {
+            "request_id": "00000000-0000-0000-0000-000000000977",
+            "expected_profile_revision": profile["profile_revision"],
+            "expected_updated_at": profile["updated_at"],
+            "reason": "测试删除玩家资料",
+            "confirm": True,
+        }
+        created = self.client.delete(
+            f"/api/queue-management/profiles/{self.profile_id}",
+            json=request_body,
+            headers=self.management_headers,
+        )
+        repeated = self.client.delete(
+            f"/api/queue-management/profiles/{self.profile_id}",
+            json=request_body,
+            headers=self.management_headers,
+        )
+        self.assertEqual(202, created.status_code)
+        self.assertEqual(200, repeated.status_code)
+        self.assertEqual("DELETE_PLAYER_PROFILE", created.get_json()["type"])
+        self.assertEqual(
+            created.get_json()["command_id"], repeated.get_json()["command_id"]
+        )
+
+        commands = self.client.get(
+            "/api/queue-terminal/commands", headers=terminal_headers
+        ).get_json()["commands"]
+        self.assertEqual(
+            [request_body["request_id"]],
+            [command["command_id"] for command in commands],
+        )
+        completed = self.client.post(
+            f"/api/queue-terminal/commands/{request_body['request_id']}/result",
+            json={"status": "APPLIED", "detail": "终端已删除玩家资料。"},
+            headers=terminal_headers,
+        )
+        self.assertEqual(200, completed.status_code)
+
+        connection = sqlite3.connect(self.database_path)
+        try:
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM player_profile WHERE profile_id = ?",
+                    (self.profile_id,),
+                ).fetchone()
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM player_account WHERE profile_id = ?",
+                    (self.profile_id,),
+                ).fetchone()
+            )
+            self.assertIsNotNone(
+                connection.execute(
+                    "SELECT 1 FROM deleted_player_profile WHERE profile_id = ?",
+                    (self.profile_id,),
+                ).fetchone()
+            )
+        finally:
+            connection.close()
+
+        stale = copy.deepcopy(snapshot)
+        stale["revision"] += 1
+        self.assertEqual(
+            204,
+            self.client.post(
+                "/api/queue-status", json=stale, headers=terminal_headers
+            ).status_code,
+        )
+        refreshed = self.client.get(
+            "/api/queue-management/overview", headers=self.management_headers
+        ).get_json()
+        self.assertNotIn(
+            self.profile_id,
+            {profile["profile_id"] for profile in refreshed["profiles"]},
+        )
+
+    def test_management_profile_delete_rejects_a_profile_with_a_registration(self):
+        snapshot, terminal_headers = self.management_control_snapshot(
+            with_registration=True
+        )
+        self.assertEqual(
+            204,
+            self.client.post(
+                "/api/queue-status", json=snapshot, headers=terminal_headers
+            ).status_code,
+        )
+        rejected = self.client.delete(
+            f"/api/queue-management/profiles/{self.profile_id}",
+            json={
+                "request_id": "00000000-0000-0000-0000-000000000978",
+                "expected_profile_revision": 3,
+                "expected_updated_at": 950000,
+                "confirm": True,
+            },
+            headers=self.management_headers,
+        )
+        self.assertEqual(409, rejected.status_code)
+        self.assertIn("排队登记", rejected.get_json()["error"])
+
     def test_bot_confirmation_context_rejects_a_changed_registration_state(self):
         snapshot = self.remote_ready_snapshot(with_registration=True)
         self.client.post("/api/queue-status", json=snapshot, headers=self.headers)
@@ -7231,7 +7358,7 @@ class QueueStatusApiTest(unittest.TestCase):
             {
                 "name": "现场终端",
                 "current_version": "0.10.0",
-                "latest_version": "0.13.4",
+                "latest_version": "0.13.5",
                 "status": "UPDATE_AVAILABLE",
                 "updated_at": 1_234_000,
             },

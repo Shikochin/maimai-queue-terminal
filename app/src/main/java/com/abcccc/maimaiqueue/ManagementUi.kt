@@ -129,6 +129,7 @@ internal fun ManagementApp() {
     var pendingProfileIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var editingProfile by remember { mutableStateOf<ManagementProfile?>(null) }
     var passwordProfile by remember { mutableStateOf<ManagementProfile?>(null) }
+    var deletingProfile by remember { mutableStateOf<ManagementProfile?>(null) }
     var createRegistrationVisible by rememberSaveable { mutableStateOf(false) }
     var reorderMachine by remember { mutableStateOf<ManagementMachine?>(null) }
     var creatingRegistration by remember { mutableStateOf(false) }
@@ -266,8 +267,10 @@ internal fun ManagementApp() {
                     profiles = overview?.profiles.orEmpty(),
                     loading = loading,
                     pendingProfileIds = pendingProfileIds,
+                    profileDeleteAllowed = overview?.capabilities?.profileDelete ?: false,
                     onEdit = { editingProfile = it },
-                    onPassword = { passwordProfile = it }
+                    onPassword = { passwordProfile = it },
+                    onDelete = { deletingProfile = it }
                 )
                 2 -> ManagementSettingsPage(
                     overview = overview,
@@ -447,6 +450,37 @@ internal fun ManagementApp() {
                         error = detail
                     }.onFailure { throwable ->
                         error = throwable.message ?: "密码修改请求失败"
+                    }
+                    pendingProfileIds = pendingProfileIds - profile.id
+                }
+            }
+        )
+    }
+
+    deletingProfile?.let { profile ->
+        ManagementProfileDeleteDialog(
+            profile = profile,
+            busy = profile.id in pendingProfileIds,
+            onDismiss = { deletingProfile = null },
+            onConfirm = {
+                pendingProfileIds = pendingProfileIds + profile.id
+                scope.launch {
+                    runCatching {
+                        ManagementApi(endpoint, token).deleteProfile(
+                            profileId = profile.id,
+                            expectedProfileRevision = profile.profileRevision,
+                            expectedUpdatedAtMillis = profile.updatedAtMillis
+                        )
+                    }.onSuccess { result ->
+                        if (result.status.equals("REJECTED", true)) {
+                            error = result.detail ?: "玩家资料删除未执行"
+                        } else {
+                            deletingProfile = null
+                            error = "删除命令已发送，等待现场终端处理。"
+                        }
+                        refresh()
+                    }.onFailure { throwable ->
+                        error = throwable.message ?: "删除玩家资料请求失败"
                     }
                     pendingProfileIds = pendingProfileIds - profile.id
                 }
@@ -1234,6 +1268,7 @@ private fun ManagementMachineCard(
             }
         )
     }
+
     prompt?.let { currentPrompt ->
         ManagementActionPromptDialog(
             prompt = currentPrompt,
@@ -2295,8 +2330,10 @@ private fun ManagementProfilesPage(
     profiles: List<ManagementProfile>,
     loading: Boolean,
     pendingProfileIds: Set<String>,
+    profileDeleteAllowed: Boolean,
     onEdit: (ManagementProfile) -> Unit,
-    onPassword: (ManagementProfile) -> Unit
+    onPassword: (ManagementProfile) -> Unit,
+    onDelete: (ManagementProfile) -> Unit
 ) {
     if (loading && profiles.isEmpty()) {
         LoadingManagementPage()
@@ -2339,11 +2376,11 @@ private fun ManagementProfilesPage(
                         style = MaterialTheme.typography.bodySmall
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = { onEdit(profile) },
                             enabled = profile.id !in pendingProfileIds,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 7.dp)
                         ) {
                             Text("编辑资料", style = MaterialTheme.typography.labelMedium)
@@ -2351,10 +2388,21 @@ private fun ManagementProfilesPage(
                         OutlinedButton(
                             onClick = { onPassword(profile) },
                             enabled = profile.webAccountBound && profile.id !in pendingProfileIds,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 7.dp)
                         ) {
                             Text("修改密码", style = MaterialTheme.typography.labelMedium)
+                        }
+                        OutlinedButton(
+                            onClick = { onDelete(profile) },
+                            enabled = profileDeleteAllowed && profile.id !in pendingProfileIds,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = AbsenceStatusColor
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 7.dp)
+                        ) {
+                            Text("删除资料", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -2566,6 +2614,41 @@ private fun ManagementPasswordDialog(
 }
 
 @Composable
+private fun ManagementProfileDeleteDialog(
+    profile: ManagementProfile,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("删除玩家资料") },
+        text = {
+            Text(
+                "确定删除“${profile.nickname}”的玩家资料吗？此操作不可恢复，网页账户、密码和现有登录会话也会失效。若资料仍有排队登记，现场终端会拒绝删除。",
+                color = PrimaryText
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = AbsenceStatusColor)
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("确认删除")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
+        }
+    )
+}
+
+@Composable
 private fun ManagementCapabilitiesPage(
     overview: ManagementOverview?,
     loading: Boolean,
@@ -2590,6 +2673,7 @@ private fun ManagementCapabilitiesPage(
         "调整队列顺序" to capabilities.queueReorder,
         "查看私有玩家资料" to capabilities.profileReadPrivate,
         "编辑所有玩家资料" to capabilities.profileEditAll,
+        "删除玩家资料" to capabilities.profileDelete,
         "修改玩家密码" to capabilities.profileResetPassword,
         "修改终端敏感策略" to capabilities.terminalPolicyEdit,
         "查看审计记录" to capabilities.auditRead

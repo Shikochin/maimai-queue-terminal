@@ -228,5 +228,8 @@ class PlayerProfilePersistenceTest {
             replacedProfiles = profiles
             return profiles
         }
+
+        override suspend fun deleteProfile(profileId: String): Boolean =
+            profileId !in failedIds
     }
 }

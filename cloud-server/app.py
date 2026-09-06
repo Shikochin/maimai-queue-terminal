@@ -84,6 +84,7 @@ BOT_PROFILE_UPDATE_FIELDS = (
     "setup_version",
 )
 PROFILE_UPDATE_COMMAND = "UPDATE_PLAYER_PROFILE"
+PROFILE_DELETE_COMMAND = "DELETE_PLAYER_PROFILE"
 QUEUE_OPERATION_COMMAND = "QUEUE_OPERATION"
 MANAGEMENT_QUEUE_ACTION_COMMAND = "MANAGEMENT_QUEUE_ACTION"
 MOBILE_REGISTRATION_COMMAND = "MOBILE_DEVICE_REGISTRATION"
@@ -317,6 +318,12 @@ REQUIRED_DATABASE_COLUMNS = {
         "profile_scope_id",
         "profile_id",
         "created_at",
+    },
+    "deleted_player_profile": {
+        "profile_scope_id",
+        "profile_id",
+        "deleted_at",
+        "command_id",
     },
     "player_auth_limit": {
         "action",
@@ -632,7 +639,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         CORS_ORIGIN=configured_cors_origin,
         PUBLIC_SITE_URL=configured_public_site_url.rstrip("/"),
         LATEST_TERMINAL_VERSION=os.getenv(
-            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.4"
+            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.5"
         ),
         LATEST_WEBSITE_VERSION=os.getenv(
             "QUEUE_LATEST_WEBSITE_VERSION", "0.13.4"
@@ -1042,6 +1049,17 @@ def initialize_database(database_path: str, *, profile_scope_id: str = "default"
                 profile_scope_id TEXT NOT NULL,
                 profile_id TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
+                PRIMARY KEY(profile_scope_id, profile_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deleted_player_profile (
+                profile_scope_id TEXT NOT NULL,
+                profile_id TEXT NOT NULL,
+                deleted_at INTEGER NOT NULL,
+                command_id TEXT NOT NULL,
                 PRIMARY KEY(profile_scope_id, profile_id)
             )
             """
@@ -1472,6 +1490,13 @@ def register_routes(app: Flask) -> None:
         if authorization_error is not None:
             return authorization_error
         return create_profile_update_command(profile_id, operation_source="MANAGEMENT_APP")
+
+    @app.delete("/api/queue-management/profiles/<profile_id>")
+    def queue_management_delete_profile(profile_id: str):
+        authorization_error = authorize_management()
+        if authorization_error is not None:
+            return authorization_error
+        return create_management_profile_delete_command(profile_id)
 
     @app.post("/api/queue-management/profiles/<profile_id>/password")
     def queue_management_update_password(profile_id: str):
@@ -4261,7 +4286,7 @@ def publish_snapshot():
                     SET status = 'REJECTED', completed_at = ?, result_detail = ?,
                         result_source = ?
                     WHERE status = 'PENDING' AND device_id = ?
-                      AND command_type IN (?, ?, ?, ?, ?, ?, ?)
+                      AND command_type IN (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         now,
@@ -4275,6 +4300,7 @@ def publish_snapshot():
                         REGISTRATION_AVAILABILITY_COMMAND,
                         TERMINAL_SETTINGS_COMMAND,
                         MACHINE_STATUS_COMMAND,
+                        PROFILE_DELETE_COMMAND,
                     ),
                 )
             connection.execute(
@@ -4295,6 +4321,16 @@ def publish_snapshot():
                 "DELETE FROM queue_private_contact WHERE queue_id = ?",
                 (current_queue_storage_id,),
             )
+        deleted_profile_ids = {
+            row["profile_id"]
+            for row in connection.execute(
+                """
+                SELECT profile_id FROM deleted_player_profile
+                WHERE profile_scope_id = ?
+                """,
+                (profile_scope_id,),
+            ).fetchall()
+        }
         stored_contacts = {
             row["registration_id"]: row
             for row in connection.execute(
@@ -4313,6 +4349,7 @@ def publish_snapshot():
                 "qq_number": contact["qq_number"],
             }
             for contact in private_contacts
+            if contact["profile_id"] not in deleted_profile_ids
         }
         all_contacts = dict(stored_contacts)
         all_contacts.update(incoming_contacts)
@@ -4389,7 +4426,7 @@ def publish_snapshot():
                 SET status = 'REJECTED', completed_at = ?,
                     result_detail = ?, result_source = ?
                 WHERE status = 'PENDING' AND claimed_at IS NULL AND device_id = ? AND (
-                    command_type IN (?, ?, ?, ?, ?, ?)
+                    command_type IN (?, ?, ?, ?, ?, ?, ?)
                     OR json_extract(payload, '$.operation_source') = 'WEBSITE_REMOTE'
                 )
                 """,
@@ -4404,6 +4441,7 @@ def publish_snapshot():
                     REGISTRATION_AVAILABILITY_COMMAND,
                     TERMINAL_SETTINGS_COMMAND,
                     MACHINE_STATUS_COMMAND,
+                    PROFILE_DELETE_COMMAND,
                 ),
             )
             connection.execute(
@@ -4584,7 +4622,7 @@ def publish_snapshot():
                         SET status = 'REJECTED', completed_at = ?, result_detail = ?,
                             result_source = ?
                         WHERE status = 'PENDING'
-                          AND command_type IN (?, ?, ?, ?, ?, ?, ?)
+                          AND command_type IN (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             now,
@@ -4597,6 +4635,7 @@ def publish_snapshot():
                             REGISTRATION_AVAILABILITY_COMMAND,
                             TERMINAL_SETTINGS_COMMAND,
                             MACHINE_STATUS_COMMAND,
+                            PROFILE_DELETE_COMMAND,
                         ),
                     )
                 connection.execute(
@@ -4654,6 +4693,24 @@ def upsert_player_profiles(
     received_at: int,
 ) -> None:
     for profile in profiles:
+        deleted = connection.execute(
+            """
+            SELECT 1 FROM deleted_player_profile
+            WHERE profile_scope_id = ? AND profile_id = ?
+            """,
+            (profile_scope_id, profile["profile_id"]),
+        ).fetchone()
+        if deleted is not None:
+            # A stale terminal snapshot must not resurrect a profile after a
+            # management deletion has been applied.
+            connection.execute(
+                """
+                DELETE FROM pending_player_profile_sync
+                WHERE profile_scope_id = ? AND profile_id = ?
+                """,
+                (profile_scope_id, profile["profile_id"]),
+            )
+            continue
         # A web-created profile may not be present in the terminal's next
         # snapshot yet. Once the terminal sends this profile back, it has
         # observed the row and the temporary current-index protection can be
@@ -5056,7 +5113,17 @@ def replace_current_player_profile_ids(
             (profile_scope_id,),
         ).fetchall()
     }
-    effective_profile_ids = set(profile_ids) | pending_ids
+    deleted_ids = {
+        row["profile_id"]
+        for row in connection.execute(
+            """
+            SELECT profile_id FROM deleted_player_profile
+            WHERE profile_scope_id = ?
+            """,
+            (profile_scope_id,),
+        ).fetchall()
+    }
+    effective_profile_ids = (set(profile_ids) | pending_ids) - deleted_ids
     connection.execute(
         "DELETE FROM current_player_profile WHERE profile_scope_id = ?",
         (profile_scope_id,),
@@ -6991,6 +7058,7 @@ MANAGEMENT_CAPABILITIES = {
     "COMMON_PLAY_PREVIEW_EDIT": True,
     "PROFILE_READ_PRIVATE": True,
     "PROFILE_EDIT_ALL": True,
+    "PROFILE_DELETE": True,
     "PROFILE_RESET_PASSWORD": True,
     "TERMINAL_POLICY_EDIT": True,
     "AUDIT_READ": True,
@@ -10132,6 +10200,168 @@ def create_profile_update_command(
     return jsonify(serialize_command(created)), 202
 
 
+def create_management_profile_delete_command(profile_id: str):
+    try:
+        profile_id = str(UUID(profile_id))
+    except ValueError:
+        return jsonify({"ok": False, "error": "玩家资料编号无效"}), 400
+    source = request.get_json(silent=True)
+    if not isinstance(source, dict):
+        return jsonify({"ok": False, "error": "请求内容必须是 JSON 对象"}), 400
+    allowed_fields = {
+        "request_id",
+        "expected_profile_revision",
+        "expected_updated_at",
+        "reason",
+        "confirm",
+    }
+    if set(source) - allowed_fields:
+        return jsonify({"ok": False, "error": "请求包含不支持的删除资料字段"}), 400
+    try:
+        command_id = read_uuid(source, "request_id")
+        expected_revision = read_integer(
+            source, "expected_profile_revision", minimum=1, maximum=2**63 - 1
+        )
+        expected_updated_at = read_integer(
+            source, "expected_updated_at", minimum=1, maximum=2**63 - 1
+        )
+        reason = read_optional_string(source, "reason", maximum_length=200) or (
+            "管理后台删除玩家资料"
+        )
+        if source.get("confirm") is not True:
+            raise ValidationError("必须明确确认删除玩家资料")
+    except ValidationError as error:
+        return jsonify(validation_error_payload(error)), 400
+
+    request_identity = {
+        "operation_source": "MANAGEMENT_APP",
+        "profile_id": profile_id,
+        "expected_profile_revision": expected_revision,
+        "expected_updated_at": expected_updated_at,
+        "reason": reason,
+        "confirm": True,
+    }
+    with open_database() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        expire_pending_commands(connection, now)
+        existing = connection.execute(
+            "SELECT * FROM terminal_command WHERE command_id = ?", (command_id,)
+        ).fetchone()
+        if existing is not None:
+            payload = json.loads(existing["payload"])
+            if (
+                existing["command_type"] != PROFILE_DELETE_COMMAND
+                or payload.get("_request") != request_identity
+            ):
+                connection.rollback()
+                return jsonify({"ok": False, "error": "request_id 已用于其他命令"}), 409
+            connection.commit()
+            return jsonify(serialize_command(existing)), 200
+
+        snapshot_row = connection.execute(
+            """
+            SELECT queue_id, device_id, payload, received_at
+            FROM queue_snapshot WHERE id = 1
+            """
+        ).fetchone()
+        if snapshot_row is None:
+            connection.rollback()
+            return jsonify({"ok": False, "error": "排队终端暂未同步"}), 404
+        if not snapshot_is_online(snapshot_row):
+            connection.rollback()
+            return jsonify({"ok": False, "error": "现场终端暂时离线，不能删除玩家资料"}), 503
+        snapshot = json.loads(snapshot_row["payload"])
+        if not snapshot.get("management_policy_supported", False):
+            connection.rollback()
+            return jsonify({"ok": False, "error": "当前现场终端不支持管理后台删除玩家资料"}), 409
+        if not snapshot.get("management_app_bound", False):
+            connection.rollback()
+            return jsonify({"ok": False, "error": "请先绑定并接管现场终端设置"}), 409
+
+        queue_storage_id, profile_scope_id = snapshot_storage_context(snapshot_row, snapshot)
+        profile = connection.execute(
+            """
+            SELECT profile_id, profile_revision, profile_updated_at
+            FROM player_profile
+            WHERE device_id = ? AND profile_id = ?
+            """,
+            (profile_scope_id, profile_id),
+        ).fetchone()
+        if profile is None:
+            tombstone = connection.execute(
+                """
+                SELECT 1 FROM deleted_player_profile
+                WHERE profile_scope_id = ? AND profile_id = ?
+                """,
+                (profile_scope_id, profile_id),
+            ).fetchone()
+            connection.rollback()
+            return jsonify(
+                {
+                    "ok": False,
+                    "code": "PROFILE_ALREADY_DELETED" if tombstone else "PROFILE_NOT_FOUND",
+                    "error": "这份玩家资料已经删除" if tombstone else "没有找到这份玩家资料",
+                }
+            ), 404
+        if (
+            profile["profile_revision"] != expected_revision
+            or profile["profile_updated_at"] != expected_updated_at
+        ):
+            connection.rollback()
+            return jsonify(
+                {"ok": False, "code": "PROFILE_CONTEXT_CHANGED", "error": "玩家资料已经更新，请刷新后重试"}
+            ), 409
+        if find_profile_registration_contexts(
+            connection, queue_storage_id, snapshot, profile_id
+        ):
+            connection.rollback()
+            return jsonify({"ok": False, "error": "玩家资料仍有排队登记，请先处理登记后再删除"}), 409
+        pending = connection.execute(
+            """
+            SELECT 1 FROM terminal_command
+            WHERE device_id = ? AND status = 'PENDING'
+              AND json_extract(payload, '$.profile_id') = ?
+            LIMIT 1
+            """,
+            (snapshot_row["device_id"], profile_id),
+        ).fetchone()
+        if pending is not None:
+            connection.rollback()
+            return jsonify({"ok": False, "error": "这份玩家资料已有操作正在等待现场终端处理"}), 409
+
+        payload = {
+            "operation_source": "MANAGEMENT_APP",
+            "profile_id": profile_id,
+            "expected_updated_at": expected_updated_at,
+            "expected_profile_revision": expected_revision,
+            "reason": reason,
+            "profile_scope_id": profile_scope_id,
+            "queue_id": snapshot_row["queue_id"],
+            "_queue_storage_id": queue_storage_id,
+            "_request": request_identity,
+        }
+        connection.execute(
+            """
+            INSERT INTO terminal_command
+                (command_id, device_id, command_type, payload, status, created_at)
+            VALUES (?, ?, ?, ?, 'PENDING', ?)
+            """,
+            (
+                command_id,
+                snapshot_row["device_id"],
+                PROFILE_DELETE_COMMAND,
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                now,
+            ),
+        )
+        connection.commit()
+        created = connection.execute(
+            "SELECT * FROM terminal_command WHERE command_id = ?", (command_id,)
+        ).fetchone()
+    return jsonify(serialize_command(created)), 202
+
+
 def create_management_registration_command():
     source = request.get_json(silent=True)
     if not isinstance(source, dict):
@@ -10501,6 +10731,92 @@ def read_terminal_commands():
     return jsonify({"commands": [serialize_command(row) for row in rows]})
 
 
+def finalize_player_profile_deletion(
+    connection: sqlite3.Connection,
+    command: sqlite3.Row,
+    *,
+    deleted_at: int,
+) -> None:
+    payload = json.loads(command["payload"])
+    profile_id = payload.get("profile_id")
+    profile_scope_id = payload.get("profile_scope_id")
+    if not isinstance(profile_id, str) or not isinstance(profile_scope_id, str):
+        raise RuntimeError("删除玩家资料命令缺少资料范围")
+    connection.execute(
+        """
+        INSERT INTO deleted_player_profile
+            (profile_scope_id, profile_id, deleted_at, command_id)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(profile_scope_id, profile_id) DO UPDATE SET
+            deleted_at = excluded.deleted_at,
+            command_id = excluded.command_id
+        """,
+        (profile_scope_id, profile_id, deleted_at, command["command_id"]),
+    )
+    invalidate_player_account_for_profile(
+        connection,
+        profile_scope_id=profile_scope_id,
+        profile_id=profile_id,
+        now=deleted_at,
+    )
+    connection.execute(
+        """
+        DELETE FROM player_profile_creation_session
+        WHERE profile_scope_id = ? AND profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+    connection.execute(
+        """
+        DELETE FROM player_binding_session
+        WHERE profile_scope_id = ? AND profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+    connection.execute(
+        """
+        DELETE FROM pending_player_profile_sync
+        WHERE profile_scope_id = ? AND profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+    connection.execute(
+        """
+        DELETE FROM current_player_profile
+        WHERE profile_scope_id = ? AND profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+    connection.execute(
+        """
+        DELETE FROM queue_private_contact
+        WHERE player_id = ?
+        """,
+        (profile_id,),
+    )
+    connection.execute(
+        """
+        DELETE FROM queue_event_recipient
+        WHERE profile_id = ?
+        """,
+        (profile_id,),
+    )
+    connection.execute(
+        """
+        DELETE FROM player_public_id_alias
+        WHERE profile_scope_id = ? AND canonical_profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+    connection.execute(
+        """
+        DELETE FROM player_profile
+        WHERE device_id = ? AND profile_id = ?
+        """,
+        (profile_scope_id, profile_id),
+    )
+
+
 def complete_terminal_command(command_id: str):
     try:
         command_id = str(UUID(command_id))
@@ -10607,6 +10923,12 @@ def complete_terminal_command(command_id: str):
                     instance_id,
                 ),
             )
+            if status == "APPLIED" and row["command_type"] == PROFILE_DELETE_COMMAND:
+                finalize_player_profile_deletion(
+                    connection,
+                    row,
+                    deleted_at=int(time.time()),
+                )
             connection.commit()
             row = connection.execute(
                 "SELECT * FROM terminal_command WHERE command_id = ?", (command_id,)

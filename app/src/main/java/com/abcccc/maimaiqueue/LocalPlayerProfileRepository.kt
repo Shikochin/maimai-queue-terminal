@@ -12,6 +12,7 @@ interface PlayerProfileRepository {
     suspend fun getProfiles(): List<PlayerProfile>
     suspend fun upsertProfile(profile: PlayerProfile): PlayerProfile?
     suspend fun replaceProfiles(profiles: List<PlayerProfile>): List<PlayerProfile>?
+    suspend fun deleteProfile(profileId: String): Boolean
 }
 
 class LocalPlayerProfileRepository(context: Context) : PlayerProfileRepository {
@@ -57,6 +58,16 @@ class LocalPlayerProfileRepository(context: Context) : PlayerProfileRepository {
             writeMutex.withLock {
                 val storedProfiles = assignMissingPublicPlayerIds(profiles)
                 storedProfiles.takeIf { saveProfiles(storedProfiles) }
+            }
+        }
+
+    override suspend fun deleteProfile(profileId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            writeMutex.withLock {
+                val profiles = assignMissingPublicPlayerIds(loadProfiles())
+                val remaining = profiles.filterNot { it.id == profileId }
+                if (remaining.size == profiles.size) return@withLock false
+                saveProfiles(remaining)
             }
         }
 

@@ -1,6 +1,6 @@
 # maimai Q
 
-[![Version](https://img.shields.io/badge/version-0.13.4-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
+[![Version](https://img.shields.io/badge/version-0.13.5-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
 [![Android](https://img.shields.io/badge/Android-10%2B-34C759?logo=android&logoColor=white)](https://developer.android.com/about/versions/10)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-007AFF)](https://developer.android.com/compose)
@@ -17,9 +17,10 @@
 - [独立公开队列页说明](public-site/README.md)
 - [玩家使用手册](docs/user-manual.md)
 - [玩家使用手册 PDF](output/pdf/maimai-Q-玩家使用手册.pdf)
-- [0.1.0 至 0.13.4 更新日志](docs/update.md)
+- [0.1.0 至 0.13.5 更新日志](docs/update.md)
 - [0.13.3 网页登录与二维码建档说明](docs/releases/0.13.3-player-profile-creation.md)
 - [0.13.4 网页与玩家资料推荐修复说明](docs/releases/0.13.4-recommendation-and-web-fixes.md)
+- [0.13.5 管理后台接管与玩家资料删除说明](docs/releases/0.13.5-management-profile-delete.md)
 - [0.13.2 自定义头像与管理后台收尾说明](docs/releases/0.13.2-avatar-management.md)
 - [0.13.1 现场终端补丁发布说明](docs/releases/0.13.1-terminal-profile-edit.md)
 - [0.13.0 管理后台发布说明](docs/releases/0.13.0-management-app.md)
@@ -119,7 +120,7 @@ maimai Q 处理的是机厅现场排队，不是线上预约系统。它将现�
 - 机台数量和游玩容量只允许在关闭登记后修改。关闭登记会清空当前批次，再次开启时重新载入最新配置和机台状态，并生成新的排队批次。
 - 重要操作使用确认弹窗、状态动画和克制的操作音效。
 
-### 管理后台（独立版本 0.13.1）
+### 管理后台（独立版本 0.13.2）
 
 - 提供独立的 Android 手机竖屏管理 App，显示全部机台、当前游玩、等待位置、线上待签到、固定组合、暂缓一次和暂时离开状态。
 - 管理员可以立即签到线上登记、新建正式登记、编辑任意登记、退出排队、暂缓一次、暂时离开、修改本次游玩偏好、转移机台和调整等待顺序。
@@ -415,7 +416,7 @@ maimai-queue-terminal/
 - 网页登录先查询 QQ 是否已绑定，再显示密码；忘记密码需要联系现场管理员核验，网页不提供仅凭 QQ 的自助重置。仓库没有包含可公开使用的生产同步令牌或正式签名密钥。
 - 公开测试部署不会预置维护者的服务地址；部署者必须自行配置后端、网站、Bot 和终端连接。GitHub Release 只提供经过长期 Release 证书签名并核验的 APK，工作区中的 Debug 或未签名产物不得对外分发。
 
-后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.4 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
+后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.5 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
 
 ## 参与开发
 

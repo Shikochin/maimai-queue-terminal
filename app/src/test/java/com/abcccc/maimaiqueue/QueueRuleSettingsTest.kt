@@ -76,13 +76,32 @@ class QueueRuleSettingsTest {
             businessHours = original.businessHours.copy(enabled = true)
         )
         val machineChange = original.copy(configuredMachineCount = 3)
+        val machineGroupChange = original.copy(
+            machineGroups = original.machineGroups +
+                MachineGroupConfiguration("secondary", "副厅"),
+            machineGroupAssignments = original.machineGroupAssignments +
+                (MachineId.A to "secondary"),
+            defaultMachineGroupId = "secondary"
+        )
+        val machineMetadataChange = original.copy(
+            machineConfigurations = original.machineConfigurations +
+                (MachineId.A to original.machineConfiguration(MachineId.A).copy(
+                    remark = "入口侧",
+                    gameType = MachineGameType.CHUNITHM,
+                    server = MachineServer.CHINA,
+                    gameVersion = "1.50",
+                    showGameVersion = true
+                ))
+        )
 
         listOf(
             policyChange,
             displayChange,
             botChange,
             businessHoursChange,
-            machineChange
+            machineChange,
+            machineGroupChange,
+            machineMetadataChange
         ).forEach { updated ->
             assertTrue(
                 original.managementControlledContent() !=

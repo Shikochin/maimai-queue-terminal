@@ -44,12 +44,12 @@ val managementBuildEnabled = providers.gradleProperty("ENABLE_MANAGEMENT_BUILD")
     .orElse(true)
 val managementApiUrl = if (managementBuildEnabled.get()) queueManagementUrl.get() else ""
 val managementApiToken = if (managementBuildEnabled.get()) queueManagementToken.get() else ""
-val localAppVersionName = "0.13.4"
-val terminalAppVersionName = "0.13.4"
-val managementAppVersionName = "0.13.1"
-val localVersionCode = 70
-val terminalVersionCode = 70
-val managementVersionCode = 67
+val localAppVersionName = "0.13.5"
+val terminalAppVersionName = "0.13.5"
+val managementAppVersionName = "0.13.2"
+val localVersionCode = 71
+val terminalVersionCode = 71
+val managementVersionCode = 68
 
 android {
     namespace = "com.abcccc.maimaiqueue"

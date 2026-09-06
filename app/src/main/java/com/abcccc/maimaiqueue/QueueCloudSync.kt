@@ -110,6 +110,14 @@ internal data class PlayerProfileUpdateCommand(
     val expectedRevision: Long = 1L
 ) : RemoteTerminalCommand
 
+internal data class PlayerProfileDeleteCommand(
+    override val commandId: String,
+    val profileId: String,
+    val expectedUpdatedAtMillis: Long,
+    val expectedRevision: Long,
+    val reason: String?
+) : RemoteTerminalCommand
+
 internal data class TerminalPolicyUpdateCommand(
     override val commandId: String,
     val createdAtMillis: Long,
@@ -1167,6 +1175,7 @@ private fun isUuid(value: String): Boolean = runCatching { UUID.fromString(value
 private const val MAX_PROFILE_ALIASES = 500
 
 private const val PROFILE_UPDATE_COMMAND = "UPDATE_PLAYER_PROFILE"
+private const val PROFILE_DELETE_COMMAND = "DELETE_PLAYER_PROFILE"
 private const val QUEUE_OPERATION_COMMAND = "QUEUE_OPERATION"
 private const val MANAGEMENT_QUEUE_ACTION_COMMAND = "MANAGEMENT_QUEUE_ACTION"
 private const val MOBILE_REGISTRATION_COMMAND = "MOBILE_DEVICE_REGISTRATION"
@@ -1182,6 +1191,7 @@ internal fun parseRemoteTerminalCommands(response: String): List<RemoteTerminalC
             val source = commands.optJSONObject(index)
             when (source?.optString("type")) {
                 PROFILE_UPDATE_COMMAND -> parsePlayerProfileUpdate(source)
+                PROFILE_DELETE_COMMAND -> parsePlayerProfileDelete(source)
                 QUEUE_OPERATION_COMMAND -> parseQueueOperation(source)
                 MANAGEMENT_QUEUE_ACTION_COMMAND -> parseManagementQueueAction(source)
                 MOBILE_REGISTRATION_COMMAND -> parseMobileDeviceRegistration(source)
@@ -1551,6 +1561,25 @@ private fun parseQueueOperation(command: JSONObject?): RemoteQueueOperationComma
             registrationOrder = payload.optionalRegistrationOrder("registration_order")
         )
     }.getOrNull()?.takeIf(::isValidQueueOperationCommand)
+}
+
+private fun parsePlayerProfileDelete(command: JSONObject?): PlayerProfileDeleteCommand? {
+    if (command == null || command.optString("type") != PROFILE_DELETE_COMMAND) return null
+    val payload = command.optJSONObject("payload") ?: return null
+    return runCatching {
+        check(payload.optString("operation_source") == RemoteQueueOperationSource.MANAGEMENT_APP.name)
+        PlayerProfileDeleteCommand(
+            commandId = command.getString("command_id"),
+            profileId = payload.getString("profile_id"),
+            expectedUpdatedAtMillis = payload.getLong("expected_updated_at"),
+            expectedRevision = payload.getLong("expected_profile_revision"),
+            reason = payload.optionalNonBlankString("reason")
+        )
+    }.getOrNull()?.takeIf {
+        isUuid(it.commandId) && isUuid(it.profileId) &&
+            it.expectedUpdatedAtMillis > 0L && it.expectedRevision > 0L &&
+            (it.reason == null || it.reason.codePointCount(0, it.reason.length) <= 200)
+    }
 }
 
 private fun parseManagementQueueAction(

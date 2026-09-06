@@ -757,6 +757,18 @@ fun createPlayerProfileAuditLog(
     )
 }
 
+fun createPlayerProfileDeletionAuditLog(
+    profile: PlayerProfile,
+    source: AuditLogSource = AuditLogSource.MANAGEMENT_APP,
+    timestampMillis: Long = System.currentTimeMillis()
+): AuditLogEntry = createAuditLogEntry(
+    category = AuditLogCategory.PLAYER_PROFILE,
+    title = "删除玩家资料",
+    detail = "已删除玩家资料“${profile.nickname}”（玩家编号 ${profile.publicPlayerId ?: "未分配"}）。",
+    source = source,
+    timestampMillis = timestampMillis
+)
+
 fun createMachineTransferAuditLog(
     category: AuditLogCategory,
     sourceMachineLabel: String,

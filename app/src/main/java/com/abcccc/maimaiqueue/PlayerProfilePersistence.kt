@@ -17,6 +17,13 @@ internal sealed interface PlayerProfileCommandPersistenceResult {
     data object PersistenceFailed : PlayerProfileCommandPersistenceResult
 }
 
+internal sealed interface PlayerProfileDeletePersistenceResult {
+    data object Applied : PlayerProfileDeletePersistenceResult
+    data object AlreadyApplied : PlayerProfileDeletePersistenceResult
+    data class Rejected(val detail: String) : PlayerProfileDeletePersistenceResult
+    data object PersistenceFailed : PlayerProfileDeletePersistenceResult
+}
+
 internal sealed interface CloudPlayerProfilePersistenceResult {
     data class Success(
         val profiles: List<PlayerProfile>,
@@ -193,6 +200,19 @@ internal class PlayerProfilePersistenceCoordinator(
             is PlayerProfileCommandDecision.Reject ->
                 PlayerProfileCommandPersistenceResult.Rejected(decision.detail)
         }
+    }
+
+    suspend fun deleteProfile(
+        profileId: String,
+        currentProfiles: () -> List<PlayerProfile>
+    ): PlayerProfileDeletePersistenceResult = writeMutex.withLock {
+        if (currentProfiles().none { it.id == profileId }) {
+            return@withLock PlayerProfileDeletePersistenceResult.AlreadyApplied
+        }
+        if (!repository.deleteProfile(profileId)) {
+            return@withLock PlayerProfileDeletePersistenceResult.PersistenceFailed
+        }
+        PlayerProfileDeletePersistenceResult.Applied
     }
 
     private suspend fun persist(profile: PlayerProfile): PlayerProfile? = try {

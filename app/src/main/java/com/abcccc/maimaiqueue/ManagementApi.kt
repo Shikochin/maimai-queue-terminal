@@ -93,6 +93,7 @@ internal data class ManagementCapabilities(
     val commonPlayPreviewEdit: Boolean,
     val profileReadPrivate: Boolean,
     val profileEditAll: Boolean,
+    val profileDelete: Boolean,
     val profileResetPassword: Boolean,
     val terminalPolicyEdit: Boolean,
     val auditRead: Boolean
@@ -486,6 +487,35 @@ internal class ManagementApi(
         }
     }
 
+    suspend fun deleteProfile(
+        profileId: String,
+        expectedProfileRevision: Long,
+        expectedUpdatedAtMillis: Long,
+        reason: String = "管理后台删除玩家资料"
+    ): ManagementCommandResult = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply {
+            put("request_id", java.util.UUID.randomUUID().toString())
+            put("expected_profile_revision", expectedProfileRevision)
+            put("expected_updated_at", expectedUpdatedAtMillis)
+            put("reason", reason.trim().ifEmpty { "管理后台删除玩家资料" })
+            put("confirm", true)
+        }.toString()
+        val connection = openConnection(
+            managementPath("/api/queue-management/profiles/$profileId"),
+            "DELETE"
+        ).apply {
+            doOutput = true
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            setFixedLengthStreamingMode(bytes.size)
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        }
+        try {
+            parseCommandResult(readResponse(connection, body))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun updatePassword(
         profileId: String,
         password: String,
@@ -791,6 +821,7 @@ private fun parseOverview(response: String): ManagementOverview {
             commonPlayPreviewEdit = capabilities.optBoolean("COMMON_PLAY_PREVIEW_EDIT", false),
             profileReadPrivate = capabilities.optBoolean("PROFILE_READ_PRIVATE", true),
             profileEditAll = capabilities.optBoolean("PROFILE_EDIT_ALL", true),
+            profileDelete = capabilities.optBoolean("PROFILE_DELETE", false),
             profileResetPassword = capabilities.optBoolean("PROFILE_RESET_PASSWORD", true),
             terminalPolicyEdit = capabilities.optBoolean("TERMINAL_POLICY_EDIT", true),
             auditRead = capabilities.optBoolean("AUDIT_READ", true)

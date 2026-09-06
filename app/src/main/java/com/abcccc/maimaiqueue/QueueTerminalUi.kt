@@ -202,6 +202,86 @@ private class MachineRuntimeStateStore {
 
 }
 
+private data class PlayerProfileDeleteCommandOutcome(
+    val applied: Boolean,
+    val detail: String,
+    val deletedProfile: PlayerProfile?,
+    val persistenceFailed: Boolean,
+    val receiptPersistenceFailed: Boolean = false
+)
+
+private suspend fun processPlayerProfileDeleteCommand(
+    command: PlayerProfileDeleteCommand,
+    profiles: List<PlayerProfile>,
+    managementAppBound: Boolean,
+    hasRegistration: (PlayerProfile) -> Boolean,
+    persistence: PlayerProfilePersistenceCoordinator,
+    persistReceipt: suspend (TerminalCommandReceipt) -> Boolean,
+    completeRemoteCommand: suspend (String, Boolean, String) -> Boolean
+): PlayerProfileDeleteCommandOutcome {
+    val profile = profiles.firstOrNull { it.id == command.profileId }
+    val rejection = when {
+        profile == null -> null
+        hasRegistration(profile) -> "玩家资料仍关联当前登记，必须先退出或移除登记后再删除。"
+        profile.revision != command.expectedRevision ||
+            profile.updatedAtMillis != command.expectedUpdatedAtMillis ->
+            "玩家资料已在终端发生更新，请刷新管理后台后重试。"
+        !managementAppBound -> "现场终端已解除管理后台接管，请重新绑定后再提交。"
+        else -> null
+    }
+    val result = if (rejection == null) {
+        persistence.deleteProfile(
+            profileId = command.profileId,
+            currentProfiles = { profiles }
+        )
+    } else {
+        PlayerProfileDeletePersistenceResult.Rejected(rejection)
+    }
+    val outcome = when (result) {
+        PlayerProfileDeletePersistenceResult.Applied ->
+            PlayerProfileDeleteCommandOutcome(
+                applied = true,
+                detail = "玩家资料已删除，网页账户和现有会话已失效。",
+                deletedProfile = profile,
+                persistenceFailed = false
+            )
+        PlayerProfileDeletePersistenceResult.AlreadyApplied ->
+            PlayerProfileDeleteCommandOutcome(
+                applied = true,
+                detail = "玩家资料已经删除。",
+                deletedProfile = null,
+                persistenceFailed = false
+            )
+        is PlayerProfileDeletePersistenceResult.Rejected ->
+            PlayerProfileDeleteCommandOutcome(
+                applied = false,
+                detail = result.detail,
+                deletedProfile = null,
+                persistenceFailed = false
+            )
+        PlayerProfileDeletePersistenceResult.PersistenceFailed ->
+            PlayerProfileDeleteCommandOutcome(
+                applied = false,
+                detail = "玩家资料暂时无法写入本机，应用将继续重试。",
+                deletedProfile = null,
+                persistenceFailed = true
+            )
+    }
+    if (outcome.persistenceFailed) return outcome
+    if (!persistReceipt(
+            TerminalCommandReceipt(
+                commandId = command.commandId,
+                applied = outcome.applied,
+                detail = outcome.detail
+            )
+        )
+    ) {
+        return outcome.copy(receiptPersistenceFailed = true)
+    }
+    completeRemoteCommand(command.commandId, outcome.applied, outcome.detail)
+    return outcome
+}
+
 @Composable
 internal fun RegistrationApp() {
     val context = LocalContext.current
@@ -1912,6 +1992,17 @@ internal fun RegistrationApp() {
         reasonDetail: String? = null,
         source: AuditLogSource = AuditLogSource.ON_SITE_TERMINAL
     ) {
+        if (
+            queueRuleSettings.managementAppBound &&
+            source == AuditLogSource.ON_SITE_TERMINAL
+        ) {
+            Toast.makeText(
+                context,
+                panguSpacing("机台管理已由管理后台接管，只能从管理后台修改。"),
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         val currentStatus = statusFor(machineId)
         val stoppedStatus = currentStatus.stop(reason, System.currentTimeMillis(), reasonDetail)
         if (stoppedStatus == currentStatus) return
@@ -1965,6 +2056,17 @@ internal fun RegistrationApp() {
         machineId: MachineId,
         source: AuditLogSource = AuditLogSource.ON_SITE_TERMINAL
     ) {
+        if (
+            queueRuleSettings.managementAppBound &&
+            source == AuditLogSource.ON_SITE_TERMINAL
+        ) {
+            Toast.makeText(
+                context,
+                panguSpacing("机台管理已由管理后台接管，只能从管理后台修改。"),
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         val stoppedStatus = statusFor(machineId)
         if (stoppedStatus.isOperational) return
         val restoredAtMillis = System.currentTimeMillis()
@@ -3923,6 +4025,40 @@ internal fun RegistrationApp() {
                                 }
                             }
 
+                            is PlayerProfileDeleteCommand -> {
+                                val outcome = processPlayerProfileDeleteCommand(
+                                    command = command,
+                                    profiles = playerProfiles,
+                                    managementAppBound = queueRuleSettings.managementAppBound,
+                                    hasRegistration = ::playerProfileAlreadyRegistered,
+                                    persistence = playerProfilePersistence,
+                                    persistReceipt = ::persistTerminalCommandReceipt,
+                                    completeRemoteCommand = { id, applied, detail ->
+                                        completeRemoteCommand(id, applied, detail)
+                                    }
+                                )
+                                outcome.deletedProfile?.let { deletedProfile ->
+                                    playerProfiles = playerProfiles.filterNot {
+                                        it.id == command.profileId
+                                    }
+                                    appendAuditLog(createPlayerProfileDeletionAuditLog(deletedProfile))
+                                    selectedPlayerProfileId = null
+                                    editingPlayerProfileId = null
+                                }
+                                if (outcome.persistenceFailed) {
+                                    localWriteFailureDetail = outcome.detail
+                                    localWriteFailureAtMillis = System.currentTimeMillis()
+                                    continue
+                                }
+                                if (outcome.receiptPersistenceFailed) {
+                                    localWriteFailureDetail =
+                                        "玩家资料删除结果暂时无法写入本机，应用将继续重试。"
+                                    localWriteFailureAtMillis = System.currentTimeMillis()
+                                    continue
+                                }
+                                localWriteFailureDetail = null
+                            }
+
                             is ManagementQueueActionCommand -> {
                                 val commandAppliedAtMillis = System.currentTimeMillis()
                                 val decision = decideManagementQueueAction(
@@ -4945,6 +5081,7 @@ internal fun RegistrationApp() {
                             businessHoursStatus = businessHoursStatus,
                             closingGracePeriod = activeClosingGracePeriod,
                             showCommonPlayPreview = queueRuleSettings.showCommonPlayPreview,
+                            machineManagementEditable = !queueRuleSettings.managementAppBound,
                             venueName = terminalInstallation.venueName,
                             cloudSyncStatus = displayedCloudSyncStatus.takeIf { cloudSyncAvailable },
                             queueUndoAction = queueUndoAction,
@@ -5016,7 +5153,15 @@ internal fun RegistrationApp() {
                                 }
                             },
                             onRestoreMachine = {
-                                if (reorderSession == null) restoreMachine(it)
+                                if (reorderSession == null && !queueRuleSettings.managementAppBound) {
+                                    restoreMachine(it)
+                                } else if (queueRuleSettings.managementAppBound) {
+                                    Toast.makeText(
+                                        context,
+                                        panguSpacing("机台管理已由管理后台接管，只能从管理后台修改。"),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             },
                             onMachineDetails = { machineDetailsTarget = it },
                             onVenueDetails = { venueIdentityDetailsVisible = true },
@@ -6262,7 +6407,9 @@ internal fun RegistrationApp() {
                             configuredMachines.any {
                                 it.status.isOperational && it.queue.waiting.isNotEmpty()
                             },
-                        canReportMachineStop = configuredMachines.any { it.status.isOperational },
+                        canReportMachineStop = !queueRuleSettings.managementAppBound &&
+                            configuredMachines.any { it.status.isOperational },
+                        machineManagementLocked = queueRuleSettings.managementAppBound,
                         onDismiss = { moreMenuVisible = false },
                         onEditRegistrations = {
                             moreMenuVisible = false
@@ -6337,7 +6484,13 @@ internal fun RegistrationApp() {
                         machines = configuredMachines,
                         onDismiss = { stopMachineChoiceVisible = false },
                         onSelect = { machineId ->
-                            if (statusFor(machineId).isOperational) {
+                            if (queueRuleSettings.managementAppBound) {
+                                Toast.makeText(
+                                    context,
+                                    panguSpacing("机台管理已由管理后台接管，只能从管理后台修改。"),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else if (statusFor(machineId).isOperational) {
                                 stopMachineChoiceVisible = false
                                 stopReasonTarget = machineId
                             }
@@ -6351,7 +6504,9 @@ internal fun RegistrationApp() {
                         registrationCount = queueFor(machineId).registrationCount,
                         onDismiss = { stopReasonTarget = null },
                         onSelect = { reason, reasonDetail ->
-                            reportMachineStopped(machineId, reason, reasonDetail)
+                            if (!queueRuleSettings.managementAppBound) {
+                                reportMachineStopped(machineId, reason, reasonDetail)
+                            }
                             stopReasonTarget = null
                         }
                     )
@@ -7578,7 +7733,21 @@ private fun QueueRuleSettingsScreen(
         if (!venueNameEdited) venueNameDraft = terminalInstallation.venueName
         if (!terminalNameEdited) terminalNameDraft = terminalInstallation.terminalName
     }
+    val managementSensitiveControlsLocked = persistedSettings.managementAppBound
+    val managementSensitiveSettingsLockReason = "已由管理后台接管，只能从管理后台修改。"
     fun updateDraft(updatedSettings: QueueRuleSettings) {
+        if (
+            managementSensitiveControlsLocked &&
+            persistedSettings.managementControlledContent() !=
+                updatedSettings.managementControlledContent()
+        ) {
+            Toast.makeText(
+                context,
+                panguSpacing(managementSensitiveSettingsLockReason),
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
         settings = updatedSettings
         hostActivity?.recordUserInteraction()
     }
@@ -7609,7 +7778,6 @@ private fun QueueRuleSettingsScreen(
     val queueConnectionConfigured = queueSyncEndpointValid && queueSyncTokenValid
     val queueConnectionEditable = !registrationOpen &&
         !persistedSettings.websiteSyncEnabled && !settings.websiteSyncEnabled
-    val managementSensitiveControlsLocked = persistedSettings.managementAppBound
     val queueConnectionChanged = hasQueueConnectionDraftChanged(
         persistedEndpoint = persistedSettings.queueSyncEndpoint,
         persistedToken = persistedSettings.queueSyncToken,
@@ -8027,14 +8195,27 @@ private fun QueueRuleSettingsScreen(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(CardBackground)
                     .border(1.dp, Separator.copy(alpha = .82f), RoundedCornerShape(12.dp))
             ) {
+                if (managementSensitiveControlsLocked) {
+                    Text(
+                        managementSensitiveSettingsLockReason,
+                        color = Color(0xFF9A5B00),
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                    )
+                    HorizontalDivider(color = Separator.copy(alpha = .72f))
+                }
                 QueueRuleSettingRow(
                     title = "设置营业时间",
-                    description = if (settings.businessHours.enabled) {
+                    description = if (managementSensitiveControlsLocked) {
+                        managementSensitiveSettingsLockReason
+                    } else if (settings.businessHours.enabled) {
                         "营业时间属于当前机厅，并与服务端同步。闭店后停止接收新登记，并为现有队列保留最多 20 分钟的收尾时间；到开店时间不会自动重新开启。"
                     } else {
                         "营业时间属于当前机厅，并与服务端同步。不开启时，登记排队不会受到营业时间影响。"
                     },
                     checked = settings.businessHours.enabled,
+                    enabled = !managementSensitiveControlsLocked,
                     onCheckedChange = {
                         updateDraft(
                             settings.copy(
@@ -8050,6 +8231,8 @@ private fun QueueRuleSettingsScreen(
                         Spacer(Modifier.height(8.dp))
                         BusinessHoursTimeRow(
                             hours = settings.businessHours.defaultHours,
+                            enabled = !managementSensitiveControlsLocked,
+                            disabledReason = managementSensitiveSettingsLockReason,
                             onOpeningClick = {
                                 showBusinessTimePicker(context, settings.businessHours.defaultHours.openingMinutes) { minutes ->
                                     updateDraft(
@@ -8088,8 +8271,13 @@ private fun QueueRuleSettingsScreen(
                     HorizontalDivider(color = Separator.copy(alpha = .72f))
                     QueueRuleSettingRow(
                         title = "按星期分别设置",
-                        description = "为周一至周日分别指定开店和闭店时间。",
+                        description = if (managementSensitiveControlsLocked) {
+                            managementSensitiveSettingsLockReason
+                        } else {
+                            "为周一至周日分别指定开店和闭店时间。"
+                        },
                         checked = settings.businessHours.useWeeklySchedule,
+                        enabled = !managementSensitiveControlsLocked,
                         onCheckedChange = {
                             updateDraft(
                                 settings.copy(
@@ -8117,6 +8305,8 @@ private fun QueueRuleSettingsScreen(
                                     )
                                     BusinessTimeButton(
                                         label = "开店 ${formatBusinessTime(hours.openingMinutes)}",
+                                        enabled = !managementSensitiveControlsLocked,
+                                        disabledReason = managementSensitiveSettingsLockReason,
                                         onClick = {
                                             showBusinessTimePicker(context, hours.openingMinutes) { minutes ->
                                                 updateDraft(
@@ -8134,6 +8324,8 @@ private fun QueueRuleSettingsScreen(
                                     Spacer(Modifier.width(8.dp))
                                     BusinessTimeButton(
                                         label = "闭店 ${formatBusinessTime(hours.closingMinutes)}",
+                                        enabled = !managementSensitiveControlsLocked,
+                                        disabledReason = managementSensitiveSettingsLockReason,
                                         onClick = {
                                             showBusinessTimePicker(context, hours.closingMinutes) { minutes ->
                                                 updateDraft(
@@ -8214,6 +8406,15 @@ private fun QueueRuleSettingsScreen(
                     .border(1.dp, Separator.copy(alpha = .82f), RoundedCornerShape(CardRadius))
             ) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                if (managementSensitiveControlsLocked) {
+                    Text(
+                        managementSensitiveSettingsLockReason,
+                        color = Color(0xFF9A5B00),
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Text(
                     "按现场实际情况添加或删除机台。机台编号始终从 A 开始连续排列，最多支持到 J；分组只改变首页显示，不改变各机台的独立队列。",
                     color = SecondaryText,
@@ -8236,13 +8437,15 @@ private fun QueueRuleSettingsScreen(
                 MachineRosterSelector(
                     machineIds = settings.configuredMachineIds,
                     selectedMachineId = activeMachineId,
-                    canAdd = !registrationOpen &&
+                    canAdd = !managementSensitiveControlsLocked && !registrationOpen &&
                         settings.configuredMachineCount < MachineId.entries.size,
-                    canDelete = !registrationOpen && settings.configuredMachineCount > 1,
-                    structureDisabledReason = if (registrationOpen) {
+                    canDelete = !managementSensitiveControlsLocked && !registrationOpen &&
+                        settings.configuredMachineCount > 1,
+                    structureDisabledReason = when {
+                        managementSensitiveControlsLocked -> managementSensitiveSettingsLockReason
+                        registrationOpen ->
                         "请先关闭登记排队，再修改机台数量。"
-                    } else {
-                        "最多支持 10 台机台。"
+                        else -> "最多支持 10 台机台。"
                     },
                     onSelect = { selectedMachineConfigurationId = it },
                     onAdd = {
@@ -8260,13 +8463,17 @@ private fun QueueRuleSettingsScreen(
                 MachineGroupingEditor(
                     settings = settings,
                     machineId = activeMachineId,
+                    enabled = !managementSensitiveControlsLocked,
+                    disabledReason = managementSensitiveSettingsLockReason,
                     onSettingsChange = ::updateDraft
                 )
                 Spacer(Modifier.height(18.dp))
                 MachineConfigurationEditor(
                     machineId = activeMachineId,
                     configuration = settings.machineConfiguration(activeMachineId),
-                    behaviorEditable = !registrationOpen,
+                    editable = !managementSensitiveControlsLocked,
+                    behaviorEditable = !registrationOpen && !managementSensitiveControlsLocked,
+                    disabledReason = managementSensitiveSettingsLockReason,
                     onConfigurationChange = { updated ->
                         updateDraft(
                             settings.copy(
@@ -8963,8 +9170,11 @@ private fun MachineRosterSelector(
 private fun MachineGroupingEditor(
     settings: QueueRuleSettings,
     machineId: MachineId,
+    enabled: Boolean = true,
+    disabledReason: String = "当前不能修改这项设置。",
     onSettingsChange: (QueueRuleSettings) -> Unit
 ) {
+    val context = LocalContext.current
     val groups = settings.configuredMachineGroups
     val activeGroupId = settings.machineGroupId(machineId)
     val activeGroup = groups.firstOrNull { it.id == activeGroupId } ?: groups.first()
@@ -8987,8 +9197,11 @@ private fun MachineGroupingEditor(
                         if (selected) SystemBlue.copy(alpha = .34f) else Separator,
                         RoundedCornerShape(8.dp)
                     )
-                    .clickable(enabled = !selected) {
-                        onSettingsChange(moveMachineToGroup(settings, machineId, group.id))
+                    .clickable {
+                        when {
+                            !enabled -> showDisabledActionReason(context, "首页分组", disabledReason)
+                            !selected -> onSettingsChange(moveMachineToGroup(settings, machineId, group.id))
+                        }
                     }
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center
@@ -9010,7 +9223,11 @@ private fun MachineGroupingEditor(
                     .background(PageBackground)
                     .border(1.dp, Separator, RoundedCornerShape(8.dp))
                     .clickable {
-                        onSettingsChange(createMachineGroupForMachine(settings, machineId))
+                        if (enabled) {
+                            onSettingsChange(createMachineGroupForMachine(settings, machineId))
+                        } else {
+                            showDisabledActionReason(context, "新建分组", disabledReason)
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -9032,6 +9249,7 @@ private fun MachineGroupingEditor(
         label = "当前分组名称",
         value = activeGroup.name,
         maximumCharacters = MAX_MACHINE_GROUP_NAME_CHARACTERS,
+        enabled = enabled,
         onValueChange = {
             onSettingsChange(renameMachineGroup(settings, activeGroup.id, it))
         }
@@ -9054,12 +9272,15 @@ private fun MachineGroupingEditor(
                         if (selected) SystemBlue.copy(alpha = .34f) else Separator,
                         RoundedCornerShape(8.dp)
                     )
-                    .clickable(enabled = !selected) {
-                        onSettingsChange(
-                            normalizeMachineLayoutSettings(
-                                settings.copy(defaultMachineGroupId = group.id)
+                    .clickable {
+                        when {
+                            !enabled -> showDisabledActionReason(context, "默认分组", disabledReason)
+                            !selected -> onSettingsChange(
+                                normalizeMachineLayoutSettings(
+                                    settings.copy(defaultMachineGroupId = group.id)
+                                )
                             )
-                        )
+                        }
                     }
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center
@@ -9088,12 +9309,16 @@ private fun MachineGroupingEditor(
 private fun MachineConfigurationEditor(
     machineId: MachineId,
     configuration: MachineConfiguration,
+    editable: Boolean = true,
     behaviorEditable: Boolean,
+    disabledReason: String = "当前不能修改这项设置。",
     onConfigurationChange: (MachineConfiguration) -> Unit
 ) {
     MachineRemarkField(
         machineLabel = "机台 ${machineId.name}",
         value = configuration.remark,
+        enabled = editable,
+        disabledReason = disabledReason,
         onValueChange = {
             onConfigurationChange(configuration.copy(remark = limitMachineRemarkLength(it)))
         },
@@ -9106,6 +9331,8 @@ private fun MachineConfigurationEditor(
         options = MachineGameType.entries.map { it to machineGameTypeLabel(it) },
         selected = configuration.gameType,
         columns = 3,
+        enabled = editable,
+        disabledReason = disabledReason,
         onSelect = { gameType ->
             onConfigurationChange(
                 configuration.copy(
@@ -9126,6 +9353,8 @@ private fun MachineConfigurationEditor(
             label = "自定义游戏类型",
             value = configuration.customGameType,
             maximumCharacters = MAX_MACHINE_TYPE_CHARACTERS,
+            enabled = editable,
+            disabledReason = disabledReason,
             onValueChange = {
                 onConfigurationChange(
                     configuration.copy(
@@ -9143,6 +9372,8 @@ private fun MachineConfigurationEditor(
             options = MachineServer.entries.map { it to machineServerLabel(it) },
             selected = configuration.server,
             columns = 4,
+            enabled = editable,
+            disabledReason = disabledReason,
             onSelect = { server ->
                 onConfigurationChange(configuration.copy(server = server))
             }
@@ -9153,6 +9384,8 @@ private fun MachineConfigurationEditor(
                 label = "自定义服务器",
                 value = configuration.customServer,
                 maximumCharacters = MAX_MACHINE_SERVER_CHARACTERS,
+                enabled = editable,
+                disabledReason = disabledReason,
                 onValueChange = {
                     onConfigurationChange(
                         configuration.copy(
@@ -9172,6 +9405,8 @@ private fun MachineConfigurationEditor(
         value = configuration.gameVersion,
         maximumCharacters = MAX_GAME_VERSION_CHARACTERS,
         placeholder = "可选",
+        enabled = editable,
+        disabledReason = disabledReason,
         onValueChange = {
             onConfigurationChange(
                 configuration.copy(
@@ -9184,13 +9419,15 @@ private fun MachineConfigurationEditor(
     Spacer(Modifier.height(6.dp))
     QueueRuleSettingRow(
         title = "在机台详情中显示游戏版本",
-        description = if (configuration.gameVersion.isBlank()) {
+        description = if (!editable) {
+            disabledReason
+        } else if (configuration.gameVersion.isBlank()) {
             "填写游戏版本后可以开启显示。"
         } else {
             "关闭后仍会在本机保留填写的版本，但不会向玩家显示。"
         },
         checked = configuration.showGameVersion,
-        enabled = configuration.gameVersion.isNotBlank(),
+        enabled = editable && configuration.gameVersion.isNotBlank(),
         onCheckedChange = {
             onConfigurationChange(configuration.copy(showGameVersion = it))
         }
@@ -9203,7 +9440,7 @@ private fun MachineConfigurationEditor(
         selected = configuration.capacity,
         columns = 2,
         enabled = behaviorEditable,
-        disabledReason = "请先关闭登记排队，再修改游玩容量。",
+        disabledReason = if (editable) "请先关闭登记排队，再修改游玩容量。" else disabledReason,
         onSelect = { capacity ->
             onConfigurationChange(configuration.copy(capacity = capacity))
         }
@@ -9226,7 +9463,7 @@ private fun MachineConfigurationEditor(
         label = "单人游玩",
         minutes = configuration.soloRoundMinutes,
         enabled = behaviorEditable,
-        disabledReason = "请先关闭登记排队，再修改计划游玩时间。",
+        disabledReason = if (editable) "请先关闭登记排队，再修改计划游玩时间。" else disabledReason,
         onMinutesChange = {
             onConfigurationChange(configuration.copy(soloRoundMinutes = it))
         }
@@ -9236,7 +9473,7 @@ private fun MachineConfigurationEditor(
         label = "两人共同游玩",
         minutes = configuration.sharedRoundMinutes,
         enabled = behaviorEditable,
-        disabledReason = "请先关闭登记排队，再修改计划游玩时间。",
+        disabledReason = if (editable) "请先关闭登记排队，再修改计划游玩时间。" else disabledReason,
         onMinutesChange = {
             onConfigurationChange(configuration.copy(sharedRoundMinutes = it))
         }
@@ -9312,16 +9549,22 @@ private fun MachineConfigurationTextField(
     value: String,
     maximumCharacters: Int,
     onValueChange: (String) -> Unit,
-    placeholder: String? = null
+    placeholder: String? = null,
+    enabled: Boolean = true,
+    disabledReason: String = "当前不能修改这项设置。"
 ) {
+    val context = LocalContext.current
     OutlinedTextField(
         value = value,
-        onValueChange = onValueChange,
+        onValueChange = { if (enabled) onValueChange(it) else showDisabledActionReason(context, label, disabledReason) },
         modifier = Modifier.fillMaxWidth(),
         label = { Text(label) },
         placeholder = placeholder?.let { { Text(it) } },
         singleLine = true,
-        supportingText = { Text("最多 $maximumCharacters 个字符。") },
+        supportingText = {
+            Text(if (enabled) "最多 $maximumCharacters 个字符。" else disabledReason)
+        },
+        enabled = enabled,
         shape = RoundedCornerShape(ControlRadius),
         colors = playerProfileTextFieldColors()
     )
@@ -9410,20 +9653,30 @@ private fun MachineRemarkField(
     machineLabel: String,
     value: String,
     onValueChange: (String) -> Unit,
+    enabled: Boolean = true,
+    disabledReason: String = "当前不能修改这项设置。",
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val isBlank = value.isBlank()
     OutlinedTextField(
         value = value,
-        onValueChange = onValueChange,
+        onValueChange = { if (enabled) onValueChange(it) else showDisabledActionReason(context, "$machineLabel 备注", disabledReason) },
         modifier = modifier,
         label = { Text("$machineLabel 备注") },
         placeholder = { Text("例如：入口侧") },
         singleLine = true,
         isError = isBlank,
         supportingText = {
-            Text(if (isBlank) "请输入备注。" else "最多 $MAX_MACHINE_REMARK_CHARACTERS 个字符。")
+            Text(
+                when {
+                    !enabled -> disabledReason
+                    isBlank -> "请输入备注。"
+                    else -> "最多 $MAX_MACHINE_REMARK_CHARACTERS 个字符。"
+                }
+            )
         },
+        enabled = enabled,
         shape = RoundedCornerShape(ControlRadius),
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = PrimaryText,
@@ -9497,6 +9750,8 @@ private fun QueueRuleSettingRow(
 @Composable
 private fun BusinessHoursTimeRow(
     hours: DailyBusinessHours,
+    enabled: Boolean = true,
+    disabledReason: String = "当前不能修改这项设置。",
     onOpeningClick: () -> Unit,
     onClosingClick: () -> Unit
 ) {
@@ -9507,11 +9762,15 @@ private fun BusinessHoursTimeRow(
         BusinessTimeButton(
             label = "开店 ${formatBusinessTime(hours.openingMinutes)}",
             onClick = onOpeningClick,
+            enabled = enabled,
+            disabledReason = disabledReason,
             modifier = Modifier.weight(1f)
         )
         BusinessTimeButton(
             label = "闭店 ${formatBusinessTime(hours.closingMinutes)}",
             onClick = onClosingClick,
+            enabled = enabled,
+            disabledReason = disabledReason,
             modifier = Modifier.weight(1f)
         )
     }
@@ -9521,26 +9780,31 @@ private fun BusinessHoursTimeRow(
 private fun BusinessTimeButton(
     label: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    disabledReason: String = "当前不能修改这项设置。"
 ) {
+    val context = LocalContext.current
     Row(
         modifier.height(42.dp)
             .clip(RoundedCornerShape(9.dp))
-            .background(PageBackground)
+            .background(if (enabled) PageBackground else DisabledBackground)
             .border(1.dp, Separator.copy(alpha = .82f), RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick)
+            .clickable {
+                if (enabled) onClick() else showDisabledActionReason(context, label, disabledReason)
+            }
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             label,
-            color = PrimaryText,
+            color = if (enabled) PrimaryText else TertiaryText,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1
         )
         Spacer(Modifier.weight(1f))
-        Text("›", color = TertiaryText, fontSize = 17.sp)
+        Text("›", color = if (enabled) TertiaryText else Separator, fontSize = 17.sp)
     }
 }
 
@@ -9736,6 +10000,7 @@ private fun HomeScreen(
     businessHoursStatus: BusinessHoursStatus,
     closingGracePeriod: Boolean,
     showCommonPlayPreview: Boolean,
+    machineManagementEditable: Boolean = true,
     venueName: String,
     cloudSyncStatus: QueueCloudSyncStatus?,
     queueUndoAction: QueueUndoAction?,
@@ -9911,6 +10176,7 @@ private fun HomeScreen(
                                         businessHoursClosingGrace = closingGracePeriod,
                                         showCommonPlayPreview = showCommonPlayPreview &&
                                             machine.configuration.capacity == 2,
+                                        machineManagementEditable = machineManagementEditable,
                                         nowMillis = nowMillis,
                                         inlineReorderSession = inlineReorderSession
                                             ?.takeIf { it.machineId == machineId },
@@ -10370,6 +10636,7 @@ private fun MachineLane(
     businessHoursClosingSoon: Boolean,
     businessHoursClosingGrace: Boolean,
     showCommonPlayPreview: Boolean,
+    machineManagementEditable: Boolean = true,
     nowMillis: Long,
     inlineReorderSession: ReorderSession?,
     inlineReorderResetToken: Int,
@@ -10445,7 +10712,12 @@ private fun MachineLane(
             Spacer(Modifier.weight(1f))
             when {
                 inlineReorderSession != null -> SmallActionButton("结束调整", onInlineReorderCancel)
-                !status.isOperational -> SmallActionButton("恢复正常使用", onRestore)
+                !status.isOperational -> SmallActionButton(
+                    "恢复正常使用",
+                    onRestore,
+                    enabled = machineManagementEditable,
+                    disabledReason = "机台管理已由管理后台接管，只能从管理后台修改。"
+                )
                 queue.playing.isNotEmpty() -> SmallActionButton(
                     "本轮结束",
                     onFinishRequest,
@@ -17275,6 +17547,7 @@ private fun MoreMenu(
     registrationOpen: Boolean,
     canEditRegistrations: Boolean,
     canReportMachineStop: Boolean,
+    machineManagementLocked: Boolean = false,
     onDismiss: () -> Unit,
     onEditRegistrations: () -> Unit,
     onOpenAuditLog: () -> Unit,
@@ -17308,7 +17581,11 @@ private fun MoreMenu(
         MenuSectionHeader("机台管理")
         ActionRow(
             title = "报告机台停止使用",
-            description = "保留所选机台的登记顺序，并暂停该机台的队列操作与计时。",
+            description = if (machineManagementLocked) {
+                "已由管理后台接管，只能从管理后台修改。"
+            } else {
+                "保留所选机台的登记顺序，并暂停该机台的队列操作与计时。"
+            },
             destructive = true,
             enabled = canReportMachineStop,
             onClick = onReportMachineStop
