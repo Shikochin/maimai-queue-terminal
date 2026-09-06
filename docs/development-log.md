@@ -12,6 +12,15 @@
 - 三个 Release APK 已用既有长期证书签名，版本和构建号为终端/本地版 `0.13.4`/`70`、管理后台 `0.13.1`/`67`；包名、权限、竖屏约束、对齐、签名和私有值扫描通过。
 - 本条记录建立时 GitHub Release、生产 API/站点部署和真实 Android 设备触控验收仍待完成；管理后台能力差距审查在本版本发布后继续。
 
+## 2026-09-06 · 0.13.4 GitHub Release 与生产部署完成
+
+- 已创建正式 GitHub Release `v0.13.4`（非草稿、非预发布），提交 `d3243fa7e7c437e5dfc7ebcc73af940ac04397e7e` 同时推送到 `main` 和注释标签 `v0.13.4`。
+- Release 已上传并复核 6 个公开附件：`maimai-Q-0.13.4-local-beta.apk`、`maimai-Q-0.13.4-terminal-beta.apk`、`maimai-Q-0.13.1-management.apk`、`public-site-0.13.4-beta.tar.gz`、`koishi-plugin-maimai-q-0.3.13.tgz` 和 `SHA256SUMS-0.13.4.txt`；远端状态均为 `uploaded`，字节数与本地一致。
+- 生产源站 `1.15.101.124` 已完成 API、队列站和主站切换。部署备份为 `/var/backups/maimai-queue-status/20260906-080331-0.13.4-player-profile-creation`，SQLite 在线/停机备份完整性均为 `ok`，旧站点目录保留为对应 `dist-previous` 回滚点。
+- 生产环境 `QUEUE_LATEST_TERMINAL_VERSION` 和 `QUEUE_LATEST_WEBSITE_VERSION` 已更新为 `0.13.4`；健康接口、两个公网域名的版本接口和 manifest、二维码创建无效令牌 JSON 响应、匿名管理鉴权均通过验收。部署后 `queue_id`、修订号和 schema 8 连续，未重置现场队列。
+- 现场终端和网站的 `current_version` 会在安装 0.13.4 APK、重新加载网页或下一次 Bot 心跳后更新；当前 API 显示旧 current、`UPDATE_AVAILABLE` 是预期升级提示。真实 Android 设备触控验收仍需现场完成。
+- 管理后台能力差距审查和后续补齐工作在本版本发布完成后恢复，普通全队列拖动继续属于日常队列操作，不会因后台绑定而禁用。
+
 ## 2026-09-05 · 0.13.3 GitHub Release 与生产部署完成
 
 - 已创建正式的 GitHub Release `v0.13.3`（非草稿、非预发布），远端 `main` 和注释标签均指向提交 `1e76c78a17e946ea6fd0a93091106b1ecfd93803`。
