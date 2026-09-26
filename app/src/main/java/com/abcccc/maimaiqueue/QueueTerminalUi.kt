@@ -123,6 +123,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -3542,7 +3543,8 @@ internal fun RegistrationApp() {
         machineStableIds = configuredMachineIds.associate { machineId ->
             machineId.name to queueRuleSettings.machineStableId(machineId)
         },
-        machineConfigurationRevision = queueRuleSettings.machineConfigurationRevision
+        machineConfigurationRevision = queueRuleSettings.machineConfigurationRevision,
+        managementPolicyRevision = queueRuleSettings.managementPolicyRevision
     )
 
     LaunchedEffect(
@@ -3710,6 +3712,9 @@ internal fun RegistrationApp() {
                                         "登记开关所属队列已经变化，请管理后台刷新后重试。"
                                     !queueRuleSettings.managementAppBound ->
                                         "现场终端已经解除管理后台接管，请重新绑定后再提交。"
+                                    command.expectedPolicyRevision != null &&
+                                        command.expectedPolicyRevision != queueRuleSettings.managementPolicyRevision ->
+                                        "终端接管策略已经更新，请管理后台刷新后重试。"
                                     command.expectedQueueRevision != queueRevision.get() ->
                                         "现场队列已经更新，请管理后台刷新后重试。"
                                     command.expectedMachineConfigurationRevision !=
@@ -3851,6 +3856,9 @@ internal fun RegistrationApp() {
                                         "机台状态命令所属队列已经变化，请管理后台刷新后重试。"
                                     !queueRuleSettings.managementAppBound ->
                                         "现场终端已经解除管理后台接管，请重新绑定后再提交。"
+                                    command.expectedPolicyRevision != null &&
+                                        command.expectedPolicyRevision != queueRuleSettings.managementPolicyRevision ->
+                                        "终端接管策略已经更新，请管理后台刷新后重试。"
                                     command.machineId !in configuredMachineIds ->
                                         "目标机台已经不存在，请管理后台刷新后重试。"
                                     command.expectedMachineConfigurationRevision !=
@@ -7520,7 +7528,11 @@ private fun AuditLogScreen(
             Text("操作日志", color = TertiaryText, fontSize = 12.sp)
         }
         Spacer(Modifier.height(14.dp))
-        Column(Modifier.fillMaxSize().widthIn(max = 980.dp).align(Alignment.CenterHorizontally)) {
+        Column(
+            Modifier.fillMaxSize()
+                .widthIn(max = terminalContentMaxWidth(980.dp))
+                .align(Alignment.CenterHorizontally)
+        ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 Text("操作日志", color = PrimaryText, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
@@ -7855,7 +7867,8 @@ private fun QueueRuleSettingsScreen(
         }
         Spacer(Modifier.height(16.dp))
         Row(
-            Modifier.fillMaxWidth().weight(1f).widthIn(max = 1160.dp)
+            Modifier.fillMaxWidth().weight(1f)
+                .widthIn(max = terminalContentMaxWidth(1160.dp, horizontalPadding = 64.dp))
                 .align(Alignment.CenterHorizontally),
             horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -8491,7 +8504,9 @@ private fun QueueRuleSettingsScreen(
         }
         Spacer(Modifier.height(14.dp))
         Row(
-            Modifier.fillMaxWidth().widthIn(max = 1160.dp).align(Alignment.CenterHorizontally),
+            Modifier.fillMaxWidth()
+                .widthIn(max = terminalContentMaxWidth(1160.dp, horizontalPadding = 64.dp))
+                .align(Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
             val validationMessage = when {
@@ -8728,7 +8743,11 @@ private fun TerminalOnboardingScreen(
                 )
             }
         }
-        Box(Modifier.fillMaxSize().widthIn(max = 820.dp).align(Alignment.CenterHorizontally)) {
+        Box(
+            Modifier.fillMaxSize()
+                .widthIn(max = terminalContentMaxWidth(820.dp))
+                .align(Alignment.CenterHorizontally)
+        ) {
             Column(
                 Modifier.fillMaxWidth().align(Alignment.Center)
                     .verticalScroll(rememberScrollState()).padding(vertical = 24.dp)
@@ -9989,6 +10008,44 @@ private fun remoteQueueOperationSourceLabel(source: RemoteQueueOperationSource):
 private fun formatAuditLogTimestamp(timestampMillis: Long): String =
     SimpleDateFormat("yyyy 年 M 月 d 日 HH:mm:ss", Locale.CHINA).format(Date(timestampMillis))
 
+/**
+ * The terminal is normally used on a fixed landscape display.  Keep the
+ * compact limits for ordinary tablets, but let wide displays use the space
+ * that is otherwise left unused by the old desktop-sized caps.
+ */
+@Composable
+private fun terminalContentMaxWidth(
+    compactLimit: Dp,
+    horizontalPadding: Dp = 72.dp
+): Dp {
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    return maxOf(compactLimit, screenWidth - horizontalPadding)
+}
+
+@Composable
+private fun TerminalMiddleDot(
+    fontSize: TextUnit,
+    color: Color = TertiaryText
+) {
+    // Keep the separator in its own fixed visual cell.  Text remains the
+    // compact `·` glyph, so font-specific side bearings cannot become text
+    // spaces that vary between Android devices.
+    Box(
+        Modifier.width(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            "·",
+            modifier = Modifier.fillMaxWidth(),
+            color = color,
+            fontSize = fontSize,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
 @Composable
 private fun HomeScreen(
     machines: List<MachineDisplayState>,
@@ -10138,7 +10195,10 @@ private fun HomeScreen(
                     onBatch = onBatch
                 )
             } else {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
                     Column(
                         Modifier.weight(1.9f).fillMaxHeight()
                     ) {
@@ -10162,8 +10222,12 @@ private fun HomeScreen(
                                     it
                                 }
                             }
-                            Column(laneColumnModifier) {
-                                groupMachines.forEachIndexed { index, machine ->
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                val laneHeight = (
+                                    maxHeight - ((groupMachines.size - 1).coerceAtLeast(0) * 18).dp
+                                    ) / groupMachines.size.coerceAtLeast(1)
+                                Column(laneColumnModifier) {
+                                    groupMachines.forEachIndexed { index, machine ->
                                     val machineId = machine.machineId
                                     MachineLane(
                                         machineId = machineId,
@@ -10220,7 +10284,7 @@ private fun HomeScreen(
                                         },
                                         centerContent = groupMachines.size == 1,
                                         modifier = if (groupMachines.size > 2) {
-                                            Modifier.height(206.dp)
+                                            Modifier.height(laneHeight.coerceAtLeast(148.dp))
                                         } else {
                                             Modifier.weight(1f)
                                         }
@@ -10232,6 +10296,7 @@ private fun HomeScreen(
                                     }
                                 }
                             }
+                        }
                         }
                         if (activeMachineGroups.size > 1) {
                             MachineGroupPageSelector(
@@ -10403,13 +10468,7 @@ private fun AppHeader(
                     color = SecondaryText,
                     fontSize = 13.sp
                 )
-                Text(
-                    "·",
-                    modifier = Modifier.width(13.dp),
-                    color = TertiaryText,
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center
-                )
+                TerminalMiddleDot(fontSize = 13.sp)
                 Text(
                     "当前共 $totalRegistrationCount 个登记",
                     color = PrimaryText,
@@ -12786,7 +12845,11 @@ private fun PlayerLibraryScreen(
             Text(contextLabel, color = TertiaryText, fontSize = 12.sp)
         }
         Spacer(Modifier.height(14.dp))
-        Column(Modifier.fillMaxSize().widthIn(max = 980.dp).align(Alignment.CenterHorizontally)) {
+        Column(
+            Modifier.fillMaxSize()
+                .widthIn(max = terminalContentMaxWidth(980.dp))
+                .align(Alignment.CenterHorizontally)
+        ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(title, color = PrimaryText, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
@@ -14412,7 +14475,11 @@ private fun WizardPage(
             Spacer(Modifier.width(16.dp))
             Text(step, color = TertiaryText, fontSize = 12.sp)
         }
-        Box(Modifier.fillMaxSize().widthIn(max = 820.dp).align(Alignment.CenterHorizontally)) {
+        Box(
+            Modifier.fillMaxSize()
+                .widthIn(max = terminalContentMaxWidth(820.dp))
+                .align(Alignment.CenterHorizontally)
+        ) {
             Column(
                 Modifier.fillMaxWidth().align(Alignment.Center)
                     .verticalScroll(rememberScrollState()).padding(vertical = 20.dp)
@@ -17725,6 +17792,11 @@ private fun TerminalInstallationDetailsDialog(
 private fun VersionHistoryDialog(onDismiss: () -> Unit) {
     val releases = listOf(
         Triple(
+            "0.13.6",
+            "终端宽屏布局与中点间距",
+            "适配 2000×1200 横屏终端：首页主体和多机台区域按可用空间动态分配，日志、设置、玩家资料库、登记向导和顺序调整页在宽屏上使用更多空间；统一 Android 中点两侧空白，并让独立分隔符不受字体 side bearing 影响。"
+        ),
+        Triple(
             "0.13.4",
             "网页与玩家资料推荐修复",
             "修复手机二维码创建玩家资料页面首屏空白，统一中点分隔符的视觉间距，并按近期游玩频率、新资料曝光期、历史熟悉度和最近使用时间综合推荐玩家资料。"
@@ -18575,7 +18647,11 @@ private fun ReorderScreen(
                 )
             }
         }
-        Column(Modifier.widthIn(max = 760.dp).fillMaxWidth().align(Alignment.CenterHorizontally)) {
+        Column(
+            Modifier.widthIn(max = terminalContentMaxWidth(760.dp))
+                .fillMaxWidth()
+                .align(Alignment.CenterHorizontally)
+        ) {
             Text(
                 if (explicitEditMode) "编辑$machineName 的登记" else "调整登记位置",
                 color = PrimaryText,

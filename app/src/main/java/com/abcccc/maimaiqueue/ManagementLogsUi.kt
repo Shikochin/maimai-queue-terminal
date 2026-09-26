@@ -2,6 +2,7 @@ package com.abcccc.maimaiqueue
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -132,7 +133,20 @@ internal fun ManagementLogsPage(
             }
         }
         if (logs.isEmpty() && !busy) {
-            item { EmptyManagementPage("当前筛选暂无日志") }
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "当前筛选暂无日志",
+                        color = SecondaryText,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
         } else {
             items(logs, key = { it.eventId.ifBlank { "cursor-${it.cursor}" } }) { log ->
                 ManagementLogCard(log)

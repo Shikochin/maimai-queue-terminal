@@ -1,6 +1,6 @@
 # maimai Q
 
-[![Version](https://img.shields.io/badge/version-0.13.5-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
+[![Version](https://img.shields.io/badge/version-0.13.6-007AFF)](https://github.com/tsuba-abcccc/maimai-queue-terminal/tags)
 [![Android](https://img.shields.io/badge/Android-10%2B-34C759?logo=android&logoColor=white)](https://developer.android.com/about/versions/10)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-007AFF)](https://developer.android.com/compose)
@@ -17,10 +17,11 @@
 - [独立公开队列页说明](public-site/README.md)
 - [玩家使用手册](docs/user-manual.md)
 - [玩家使用手册 PDF](output/pdf/maimai-Q-玩家使用手册.pdf)
-- [0.1.0 至 0.13.5 更新日志](docs/update.md)
+- [0.1.0 至 0.13.6 更新日志](docs/update.md)
 - [0.13.3 网页登录与二维码建档说明](docs/releases/0.13.3-player-profile-creation.md)
 - [0.13.4 网页与玩家资料推荐修复说明](docs/releases/0.13.4-recommendation-and-web-fixes.md)
 - [0.13.5 管理后台接管与玩家资料删除说明](docs/releases/0.13.5-management-profile-delete.md)
+- [0.13.6 终端宽屏布局与中点间距说明](docs/releases/0.13.6-terminal-layout.md)
 - [0.13.2 自定义头像与管理后台收尾说明](docs/releases/0.13.2-avatar-management.md)
 - [0.13.1 现场终端补丁发布说明](docs/releases/0.13.1-terminal-profile-edit.md)
 - [0.13.0 管理后台发布说明](docs/releases/0.13.0-management-app.md)
@@ -416,7 +417,7 @@ maimai-queue-terminal/
 - 网页登录先查询 QQ 是否已绑定，再显示密码；忘记密码需要联系现场管理员核验，网页不提供仅凭 QQ 的自助重置。仓库没有包含可公开使用的生产同步令牌或正式签名密钥。
 - 公开测试部署不会预置维护者的服务地址；部署者必须自行配置后端、网站、Bot 和终端连接。GitHub Release 只提供经过长期 Release 证书签名并核验的 APK，工作区中的 Debug 或未签名产物不得对外分发。
 
-后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.5 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
+后续计划以 [`docs/roadmap.md`](docs/roadmap.md) 为准：当前 0.13.6 发布收尾后，0.14.0 才开始多终端联动；多机厅、游玩时间自动学习和公开部署加固分别保留在 0.15.0、0.16.0 与 1.0.0。管理后台的能力基准始终是现场终端和 `queue-core`，不是 QQ Bot 或网页端。
 
 ## 参与开发
 

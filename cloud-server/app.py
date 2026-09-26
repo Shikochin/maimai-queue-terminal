@@ -639,7 +639,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
         CORS_ORIGIN=configured_cors_origin,
         PUBLIC_SITE_URL=configured_public_site_url.rstrip("/"),
         LATEST_TERMINAL_VERSION=os.getenv(
-            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.5"
+            "QUEUE_LATEST_TERMINAL_VERSION", "0.13.6"
         ),
         LATEST_WEBSITE_VERSION=os.getenv(
             "QUEUE_LATEST_WEBSITE_VERSION", "0.13.4"
@@ -6370,6 +6370,7 @@ def create_management_terminal_queue_action():
         "request_id",
         "expected_queue_id",
         "expected_queue_revision",
+        "expected_management_policy_revision",
         "expected_machine_configuration_revision",
         "action",
         "machine_id",
@@ -6447,6 +6448,16 @@ def create_management_terminal_queue_action():
         expected_queue_id = read_uuid(source, "expected_queue_id")
         expected_queue_revision = read_integer(
             source, "expected_queue_revision", minimum=1, maximum=2**63 - 1
+        )
+        expected_policy_revision = (
+            read_integer(
+                source,
+                "expected_management_policy_revision",
+                minimum=0,
+                maximum=2**63 - 1,
+            )
+            if "expected_management_policy_revision" in source
+            else None
         )
         expected_machine_revision = read_integer(
             source,
@@ -6594,6 +6605,7 @@ def create_management_terminal_queue_action():
         "action": action,
         "queue_id": expected_queue_id,
         "queue_revision": expected_queue_revision,
+        "expected_management_policy_revision": expected_policy_revision,
         "machine_configuration_revision": expected_machine_revision,
         "machine_id": machine_id,
         "machine_stable_id": machine_stable_id,
@@ -6651,6 +6663,11 @@ def create_management_terminal_queue_action():
             snapshot_row["queue_id"] != expected_queue_id
             or snapshot_row["revision"] != expected_queue_revision
             or snapshot.get("machine_configuration_revision", 1) != expected_machine_revision
+            or (
+                expected_policy_revision is not None
+                and int(snapshot.get("management_policy_revision", 0))
+                != expected_policy_revision
+            )
         ):
             connection.rollback()
             return jsonify(
@@ -6737,6 +6754,7 @@ def create_management_terminal_queue_action():
             "operation_source": "MANAGEMENT_APP",
             "queue_id": expected_queue_id,
             "queue_revision": expected_queue_revision,
+            "expected_management_policy_revision": expected_policy_revision,
             "machine_configuration_revision": expected_machine_revision,
             "action": action,
             "machine_id": machine_id,
@@ -7470,6 +7488,7 @@ def create_management_registration_availability_command():
         "request_id",
         "expected_queue_id",
         "expected_queue_revision",
+        "expected_management_policy_revision",
         "expected_machine_configuration_revision",
         "expected_registration_open",
         "registration_open",
@@ -7486,6 +7505,16 @@ def create_management_registration_availability_command():
         expected_queue_id = read_uuid(source, "expected_queue_id")
         expected_queue_revision = read_integer(
             source, "expected_queue_revision", minimum=1, maximum=2**63 - 1
+        )
+        expected_policy_revision = (
+            read_integer(
+                source,
+                "expected_management_policy_revision",
+                minimum=0,
+                maximum=2**63 - 1,
+            )
+            if "expected_management_policy_revision" in source
+            else None
         )
         expected_machine_revision = read_integer(
             source,
@@ -7523,6 +7552,7 @@ def create_management_registration_availability_command():
         "operation_source": "MANAGEMENT_APP",
         "queue_id": expected_queue_id,
         "expected_queue_revision": expected_queue_revision,
+        "expected_management_policy_revision": expected_policy_revision,
         "expected_machine_configuration_revision": expected_machine_revision,
         "expected_registration_open": expected_registration_open,
         "registration_open": registration_open,
@@ -7570,6 +7600,13 @@ def create_management_registration_availability_command():
         if expected_machine_revision != int(snapshot.get("machine_configuration_revision", 1)):
             connection.rollback()
             return jsonify({"ok": False, "code": "QUEUE_CONTEXT_CHANGED", "error": "现场机台配置已经更新，请刷新后再提交"}), 409
+        if (
+            expected_policy_revision is not None
+            and expected_policy_revision
+            != int(snapshot.get("management_policy_revision", 0))
+        ):
+            connection.rollback()
+            return jsonify({"ok": False, "code": "QUEUE_CONTEXT_CHANGED", "error": "终端接管策略已经更新，请刷新后再提交"}), 409
         if expected_registration_open != bool(
             snapshot.get(
                 "registration_control_open",
@@ -7614,6 +7651,7 @@ def create_management_machine_status_command():
     allowed_fields = {
         "request_id",
         "expected_queue_id",
+        "expected_management_policy_revision",
         "expected_machine_configuration_revision",
         "machine_id",
         "expected_machine_stable_id",
@@ -7630,6 +7668,16 @@ def create_management_machine_status_command():
     try:
         request_id = read_uuid(source, "request_id")
         expected_queue_id = read_uuid(source, "expected_queue_id")
+        expected_policy_revision = (
+            read_integer(
+                source,
+                "expected_management_policy_revision",
+                minimum=0,
+                maximum=2**63 - 1,
+            )
+            if "expected_management_policy_revision" in source
+            else None
+        )
         expected_machine_revision = read_integer(
             source,
             "expected_machine_configuration_revision",
@@ -7664,6 +7712,7 @@ def create_management_machine_status_command():
     request_identity = {
         "operation_source": "MANAGEMENT_APP",
         "queue_id": expected_queue_id,
+        "expected_management_policy_revision": expected_policy_revision,
         "expected_machine_configuration_revision": expected_machine_revision,
         "machine_id": machine_id,
         "machine_stable_id": machine_stable_id,
@@ -7712,6 +7761,13 @@ def create_management_machine_status_command():
         if expected_machine_revision != int(snapshot.get("machine_configuration_revision", 1)):
             connection.rollback()
             return jsonify({"ok": False, "code": "QUEUE_CONTEXT_CHANGED", "error": "现场机台配置已经更新，请刷新后再提交"}), 409
+        if (
+            expected_policy_revision is not None
+            and expected_policy_revision
+            != int(snapshot.get("management_policy_revision", 0))
+        ):
+            connection.rollback()
+            return jsonify({"ok": False, "code": "QUEUE_CONTEXT_CHANGED", "error": "终端接管策略已经更新，请刷新后再提交"}), 409
         machine = (snapshot.get("machines") or {}).get(machine_id)
         if not isinstance(machine, dict) or machine.get("stable_id") != machine_stable_id:
             connection.rollback()

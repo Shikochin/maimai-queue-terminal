@@ -160,6 +160,7 @@ internal data class ManagementTerminalActionRequest(
     val noShowResolution: String? = null,
     val startNextWhenPlayingBecomesEmpty: Boolean = true,
     val advanceWhenPlayingEmpty: Boolean = false,
+    val expectedPolicyRevision: Long? = null,
     val reason: String
 )
 
@@ -292,6 +293,7 @@ internal class ManagementApi(
                 "expected_machine_configuration_revision",
                 overview.machineConfigurationRevision
             )
+            put("expected_management_policy_revision", overview.terminalPolicy.revision)
             put("action", request.action.name)
             put("machine_id", request.machine.id)
             put("expected_machine_stable_id", machineStableId)
@@ -582,6 +584,7 @@ internal class ManagementApi(
     suspend fun updateRegistrationAvailability(
         expectedQueueId: String,
         expectedQueueRevision: Long,
+        expectedPolicyRevision: Long,
         expectedMachineConfigurationRevision: Long,
         expectedRegistrationOpen: Boolean,
         registrationOpen: Boolean,
@@ -594,6 +597,7 @@ internal class ManagementApi(
             put("request_id", java.util.UUID.randomUUID().toString())
             put("expected_queue_id", expectedQueueId)
             put("expected_queue_revision", expectedQueueRevision)
+            put("expected_management_policy_revision", expectedPolicyRevision)
             put("expected_machine_configuration_revision", expectedMachineConfigurationRevision)
             put("expected_registration_open", expectedRegistrationOpen)
             put("registration_open", registrationOpen)
@@ -648,6 +652,7 @@ internal class ManagementApi(
 
     suspend fun updateMachineStatus(
         expectedQueueId: String,
+        expectedPolicyRevision: Long,
         expectedMachineConfigurationRevision: Long,
         machine: ManagementMachine,
         operational: Boolean,
@@ -659,6 +664,7 @@ internal class ManagementApi(
         body = JSONObject().apply {
             put("request_id", java.util.UUID.randomUUID().toString())
             put("expected_queue_id", expectedQueueId)
+            put("expected_management_policy_revision", expectedPolicyRevision)
             put("expected_machine_configuration_revision", expectedMachineConfigurationRevision)
             put("machine_id", machine.id)
             put("expected_machine_stable_id", machine.stableId)

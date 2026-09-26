@@ -7,6 +7,40 @@ import org.junit.Test
 
 class RemoteQueueOperationsTest {
     @Test
+    fun managementQueueActionRejectsWhenTerminalPolicyRevisionChanged() {
+        val current = state().copy(
+            machineStableIds = mapOf(
+                "A" to "10000000000000000000000000000001",
+                "B" to "10000000000000000000000000000002"
+            ),
+            managementPolicyRevision = 4L
+        )
+        val command = ManagementQueueActionCommand(
+            commandId = "00000000-0000-0000-0000-000000000490",
+            createdAtMillis = 2_000L,
+            queueId = QUEUE_ID,
+            queueRevision = 1L,
+            machineConfigurationRevision = 1L,
+            expectedPolicyRevision = 3L,
+            action = ManagementQueueAction.ADD_TEMPORARY_REGISTRATION,
+            machineId = "A",
+            machineStableId = "10000000000000000000000000000001",
+            expectedPlayingRegistrationIds = emptyList(),
+            expectedWaitingPositionRegistrationIds = emptyList(),
+            displayId = "管理临时登记"
+        )
+
+        val result = decideManagementQueueAction(command, current)
+
+        assertTrue(result is ManagementQueueActionDecision.Reject)
+        assertEquals(
+            "终端接管策略已经更新，请刷新管理后台后再操作。",
+            (result as ManagementQueueActionDecision.Reject).detail
+        )
+        assertTrue(current.queues.values.all { it.allRegistrations.isEmpty() })
+    }
+
+    @Test
     fun terminalRegistrationInputsAreNormalizedBeforeSinglePlayerCapacityValidation() {
         val action = QueueAction.AddRegistrations(
             machineId = "A",

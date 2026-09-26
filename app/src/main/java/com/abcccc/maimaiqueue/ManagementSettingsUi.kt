@@ -95,8 +95,14 @@ internal fun ManagementSettingsPage(
         return
     }
     val terminalSettings = overview.terminalSettings
+    val policyEditAllowed = overview.capabilities.terminalPolicyEdit
+    val registrationControlAllowed = overview.capabilities.registrationControl
+    val machineStatusEditAllowed = overview.capabilities.machineStatusEdit
+    val machineConfigurationEditAllowed = overview.capabilities.machineConfigurationEdit
+    val businessHoursEditAllowed = overview.capabilities.businessHoursEdit
+    val commonPlayPreviewEditAllowed = overview.capabilities.commonPlayPreviewEdit
     val canEdit = terminalSettings.supported && overview.terminalPolicy.managementAppBound
-    val canEditRiskSensitiveSettings = canEdit && !overview.registrationOpen
+    val canEditRiskSensitiveSettings = canEdit && machineConfigurationEditAllowed && !overview.registrationOpen
     var showPreview by remember(terminalSettings) {
         mutableStateOf(terminalSettings.showCommonPlayPreview)
     }
@@ -187,6 +193,7 @@ internal fun ManagementSettingsPage(
             ManagementTerminalPolicyCard(
                 policy = overview.terminalPolicy,
                 busy = policyBusy,
+                canEdit = policyEditAllowed,
                 onSubmit = onPolicySubmit
             )
         }
@@ -195,7 +202,7 @@ internal fun ManagementSettingsPage(
                 ManagementSettingsSwitchRow(
                     title = "开放登记排队",
                     checked = overview.registrationOpen,
-                    enabled = canEdit && !registrationBusy,
+                    enabled = canEdit && registrationControlAllowed && !registrationBusy,
                     onCheckedChange = { open ->
                         if (open) onRegistrationOpenChange(true) else closeRegistrationConfirm = true
                     }
@@ -212,13 +219,13 @@ internal fun ManagementSettingsPage(
                 ManagementSettingsSwitchRow(
                     title = "共同游玩预览",
                     checked = showPreview,
-                    enabled = canEdit && !settingsBusy,
+                    enabled = canEdit && commonPlayPreviewEditAllowed && !settingsBusy,
                     onCheckedChange = { showPreview = it }
                 )
                 Spacer(Modifier.height(6.dp))
                 ManagementBusinessHoursEditor(
                     value = businessHours,
-                    enabled = canEdit && !settingsBusy,
+                    enabled = canEdit && businessHoursEditAllowed && !settingsBusy,
                     onChange = { businessHours = it }
                 )
             }
@@ -234,7 +241,7 @@ internal fun ManagementSettingsPage(
                         onClick = {
                             groups = groups + MachineGroupConfiguration(newMachineInternalId(), "分组 ${groups.size + 1}")
                         },
-                        enabled = canEdit && !settingsBusy && groups.size < machines.size.coerceAtLeast(1)
+                        enabled = canEdit && machineConfigurationEditAllowed && !settingsBusy && groups.size < machines.size.coerceAtLeast(1)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "新增分组", tint = SystemBlue)
                     }
@@ -254,7 +261,7 @@ internal fun ManagementSettingsPage(
                             modifier = Modifier.weight(1f),
                             label = { Text("分组 ${index + 1}") },
                             singleLine = true,
-                            enabled = canEdit && !settingsBusy
+                            enabled = canEdit && machineConfigurationEditAllowed && !settingsBusy
                         )
                         IconButton(
                             onClick = {
@@ -264,7 +271,7 @@ internal fun ManagementSettingsPage(
                                     if (defaultGroupId == group.id) defaultGroupId = groups.first().id
                                 }
                             },
-                            enabled = canEdit && !settingsBusy && groups.size > 1 && machines.none { it.groupId == group.id }
+                            enabled = canEdit && machineConfigurationEditAllowed && !settingsBusy && groups.size > 1 && machines.none { it.groupId == group.id }
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = "删除分组", tint = Destructive)
                         }
@@ -276,7 +283,7 @@ internal fun ManagementSettingsPage(
                         title = "默认分组",
                         selectedId = defaultGroupId,
                         groups = groups,
-                        enabled = canEdit && !settingsBusy,
+                        enabled = canEdit && machineConfigurationEditAllowed && !settingsBusy,
                         onSelected = { defaultGroupId = it }
                     )
                 }
@@ -334,8 +341,9 @@ internal fun ManagementSettingsPage(
                     ManagementSettingsMachineRow(
                         machine = machine,
                         groups = groups,
-                        enabled = canEdit && !settingsBusy,
+                        enabled = canEdit && machineConfigurationEditAllowed && !settingsBusy,
                         riskSensitiveEditEnabled = canEditRiskSensitiveSettings && !settingsBusy,
+                        statusEditEnabled = canEdit && machineStatusEditAllowed && !settingsBusy,
                         statusBusy = statusBusy,
                         canRemove = machines.size > 1 && machine.id == machines.lastOrNull()?.id,
                         onEdit = { editingMachine = machine },
@@ -353,7 +361,8 @@ internal fun ManagementSettingsPage(
                 }
                 Button(
                     onClick = { onSave(normalizedDraft()) },
-                    enabled = canEdit && !settingsBusy && machines.isNotEmpty(),
+                    enabled = canEdit && !settingsBusy && machines.isNotEmpty() &&
+                        (commonPlayPreviewEditAllowed || businessHoursEditAllowed || machineConfigurationEditAllowed),
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 9.dp)
                 ) {
@@ -433,6 +442,7 @@ private fun SurfaceLikeSettingsCard(content: @Composable () -> Unit) {
 private fun ManagementTerminalPolicyCard(
     policy: ManagementTerminalPolicy,
     busy: Boolean,
+    canEdit: Boolean,
     onSubmit: (ManagementTerminalPolicy) -> Unit
 ) {
     if (!policy.supported) {
@@ -452,17 +462,17 @@ private fun ManagementTerminalPolicyCard(
             Text(if (policy.managementAppBound) "已接管" else "未接管", color = if (policy.managementAppBound) OnlineRegistrationStatusColor else TertiaryText, style = MaterialTheme.typography.labelSmall)
         }
         Spacer(Modifier.height(4.dp))
-        ManagementSettingsSwitchRow("允许线上登记", draft.allowOnlineRegistration, !busy) { draft = draft.copy(allowOnlineRegistration = it) }
-        ManagementSettingsSwitchRow("允许暂缓一次", draft.allowDeferOneRound, !busy) { draft = draft.copy(allowDeferOneRound = it) }
-        ManagementSettingsSwitchRow("允许暂时离开", draft.allowTemporaryLeave, !busy) { draft = draft.copy(allowTemporaryLeave = it) }
-        ManagementSettingsSwitchRow("QQ Bot 联动", draft.oneBotSyncEnabled, !busy) { draft = draft.copy(oneBotSyncEnabled = it) }
+        ManagementSettingsSwitchRow("允许线上登记", draft.allowOnlineRegistration, canEdit && !busy) { draft = draft.copy(allowOnlineRegistration = it) }
+        ManagementSettingsSwitchRow("允许暂缓一次", draft.allowDeferOneRound, canEdit && !busy) { draft = draft.copy(allowDeferOneRound = it) }
+        ManagementSettingsSwitchRow("允许暂时离开", draft.allowTemporaryLeave, canEdit && !busy) { draft = draft.copy(allowTemporaryLeave = it) }
+        ManagementSettingsSwitchRow("QQ Bot 联动", draft.oneBotSyncEnabled, canEdit && !busy) { draft = draft.copy(oneBotSyncEnabled = it) }
         Spacer(Modifier.height(4.dp))
         Text("绑定后现场终端不能修改以上敏感设置；正常拖动队列排序仍由终端负责。", color = TertiaryText, style = MaterialTheme.typography.labelSmall)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = { onSubmit(draft.copy(managementAppBound = true)) },
-                enabled = !busy && (!policy.managementAppBound || changed),
+                enabled = canEdit && !busy && (!policy.managementAppBound || changed),
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
@@ -472,7 +482,7 @@ private fun ManagementTerminalPolicyCard(
             if (policy.managementAppBound) {
                 OutlinedButton(
                     onClick = { onSubmit(draft.copy(managementAppBound = false)) },
-                    enabled = !busy,
+                    enabled = canEdit && !busy,
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) { Text("解除接管") }
@@ -634,6 +644,7 @@ private fun ManagementSettingsMachineRow(
     groups: List<MachineGroupConfiguration>,
     enabled: Boolean,
     riskSensitiveEditEnabled: Boolean,
+    statusEditEnabled: Boolean,
     statusBusy: Boolean,
     canRemove: Boolean,
     onEdit: () -> Unit,
@@ -664,7 +675,7 @@ private fun ManagementSettingsMachineRow(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = onStatus,
-                enabled = enabled && !statusBusy,
+                enabled = statusEditEnabled && !statusBusy,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(vertical = 6.dp)
             ) {

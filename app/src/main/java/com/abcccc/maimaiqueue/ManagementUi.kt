@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -68,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -164,23 +166,67 @@ internal fun ManagementApp() {
         onSubmitted: (() -> Unit)? = null
     ) {
         val currentOverview = overview ?: return
-        val pendingKeys = request.registrationIds.toSet() + request.machine.id
+        val pendingKeys = request.registrationIds.toSet() + buildSet {
+            add(request.machine.id)
+            request.targetMachine?.id?.let(::add)
+        }
         pendingCommandIds = pendingCommandIds + pendingKeys
         scope.launch {
             runCatching {
-                ManagementApi(endpoint, token).terminalQueueAction(currentOverview, request)
+                val api = ManagementApi(endpoint, token)
+                val initial = api.terminalQueueAction(currentOverview, request)
+                var result = initial
+                repeat(30) {
+                    if (result.status.uppercase() !in setOf("PENDING", "PROCESSING", "IN_PROGRESS")) {
+                        return@repeat
+                    }
+                    delay(1_000L)
+                    result = api.fetchCommand(initial.commandId)
+                }
+                result
             }.onSuccess { result ->
-                if (result.status.equals("REJECTED", true)) {
+                when {
+                    result.status.equals("REJECTED", true) -> {
                     error = result.detail ?: "现场终端未执行这项队列操作"
-                } else {
+                    }
+                    result.status.uppercase() in setOf("PENDING", "PROCESSING", "IN_PROGRESS") -> {
+                        error = "队列操作已发送，现场终端仍在处理中，请稍后刷新。"
+                    }
+                    else -> {
                     error = "队列操作已发送，等待现场终端处理。"
                     onSubmitted?.invoke()
+                    }
                 }
                 refresh()
             }.onFailure { throwable ->
                 error = throwable.message ?: "管理队列操作请求失败"
             }
             pendingCommandIds = pendingCommandIds - pendingKeys
+        }
+    }
+
+    fun submitTerminalPolicy(policy: ManagementTerminalPolicy) {
+        val currentOverview = overview ?: return
+        updatingTerminalPolicy = true
+        scope.launch {
+            runCatching {
+                ManagementApi(endpoint, token).updateTerminalPolicy(
+                    expectedQueueId = currentOverview.queueId,
+                    expectedPolicyRevision = currentOverview.terminalPolicy.revision,
+                    managementAppBound = policy.managementAppBound,
+                    allowOnlineRegistration = policy.allowOnlineRegistration,
+                    allowDeferOneRound = policy.allowDeferOneRound,
+                    allowTemporaryLeave = policy.allowTemporaryLeave,
+                    oneBotSyncEnabled = policy.oneBotSyncEnabled,
+                    reason = if (policy.managementAppBound) "管理后台接管终端敏感策略" else "管理后台解除终端敏感策略接管"
+                )
+            }.onSuccess { result ->
+                error = if (result.status.equals("REJECTED", true)) result.detail ?: "终端策略修改未执行" else "终端策略命令已发送，等待现场终端处理。"
+                refresh()
+            }.onFailure { throwable ->
+                error = throwable.message ?: "终端策略修改请求失败"
+            }
+            updatingTerminalPolicy = false
         }
     }
 
@@ -233,7 +279,7 @@ internal fun ManagementApp() {
                 containerColor = CardBackground,
                 contentColor = SystemBlue
             ) {
-                listOf("队列", "玩家资料", "设置", "日志").forEachIndexed { index, label ->
+                listOf("队列", "玩家资料", "设置", "日志", "权限").forEachIndexed { index, label ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
@@ -261,6 +307,8 @@ internal fun ManagementApp() {
                     profiles = overview?.profiles.orEmpty(),
                     queueRules = overview?.queueRules.orEmpty(),
                     registrationOpen = overview?.registrationOpen == true,
+                    queueEditAllowed = overview?.capabilities?.queueEditAll ?: false,
+                    queueReorderAllowed = overview?.capabilities?.queueReorder ?: false,
                     onTerminalAction = { request -> submitTerminalAction(request) }
                 )
                 1 -> ManagementProfilesPage(
@@ -268,6 +316,8 @@ internal fun ManagementApp() {
                     loading = loading,
                     pendingProfileIds = pendingProfileIds,
                     profileDeleteAllowed = overview?.capabilities?.profileDelete ?: false,
+                    profileEditAllowed = overview?.capabilities?.profileEditAll ?: false,
+                    profileResetPasswordAllowed = overview?.capabilities?.profileResetPassword ?: false,
                     onEdit = { editingProfile = it },
                     onPassword = { passwordProfile = it },
                     onDelete = { deletingProfile = it }
@@ -279,31 +329,7 @@ internal fun ManagementApp() {
                     registrationBusy = updatingRegistrationAvailability,
                     statusBusy = updatingMachineStatus,
                     policyBusy = updatingTerminalPolicy,
-                    onPolicySubmit = { policy ->
-                        overview?.let { currentOverview ->
-                            updatingTerminalPolicy = true
-                            scope.launch {
-                                runCatching {
-                                    ManagementApi(endpoint, token).updateTerminalPolicy(
-                                        expectedQueueId = currentOverview.queueId,
-                                        expectedPolicyRevision = currentOverview.terminalPolicy.revision,
-                                        managementAppBound = policy.managementAppBound,
-                                        allowOnlineRegistration = policy.allowOnlineRegistration,
-                                        allowDeferOneRound = policy.allowDeferOneRound,
-                                        allowTemporaryLeave = policy.allowTemporaryLeave,
-                                        oneBotSyncEnabled = policy.oneBotSyncEnabled,
-                                        reason = if (policy.managementAppBound) "管理后台接管终端敏感策略" else "管理后台解除终端敏感策略接管"
-                                    )
-                                }.onSuccess { result ->
-                                    error = if (result.status.equals("REJECTED", true)) result.detail ?: "终端策略修改未执行" else "终端策略命令已发送，等待现场终端处理。"
-                                    refresh()
-                                }.onFailure { throwable ->
-                                    error = throwable.message ?: "终端策略修改请求失败"
-                                }
-                                updatingTerminalPolicy = false
-                            }
-                        }
-                    },
+                    onPolicySubmit = ::submitTerminalPolicy,
                     onRegistrationOpenChange = { registrationOpen ->
                         overview?.let { currentOverview ->
                             updatingRegistrationAvailability = true
@@ -312,6 +338,7 @@ internal fun ManagementApp() {
                                     ManagementApi(endpoint, token).updateRegistrationAvailability(
                                         expectedQueueId = currentOverview.queueId,
                                         expectedQueueRevision = currentOverview.queueRevision,
+                                        expectedPolicyRevision = currentOverview.terminalPolicy.revision,
                                         expectedMachineConfigurationRevision = currentOverview.machineConfigurationRevision,
                                         expectedRegistrationOpen = currentOverview.registrationOpen,
                                         registrationOpen = registrationOpen,
@@ -366,6 +393,7 @@ internal fun ManagementApp() {
                                 runCatching {
                                     ManagementApi(endpoint, token).updateMachineStatus(
                                         expectedQueueId = currentOverview.queueId,
+                                        expectedPolicyRevision = currentOverview.terminalPolicy.revision,
                                         expectedMachineConfigurationRevision = currentOverview.machineConfigurationRevision,
                                         machine = machine,
                                         operational = operational,
@@ -390,6 +418,12 @@ internal fun ManagementApp() {
                     overview = overview,
                     loadingOverview = loading,
                     onError = { detail -> if (detail != null) error = detail }
+                )
+                4 -> ManagementCapabilitiesPage(
+                    overview = overview,
+                    loading = loading,
+                    busy = updatingTerminalPolicy,
+                    onSubmit = ::submitTerminalPolicy
                 )
                 else -> EmptyManagementPage("请选择管理页面")
             }
@@ -699,6 +733,8 @@ private fun ManagementQueuePage(
     profiles: List<ManagementProfile>,
     queueRules: Map<String, Boolean>,
     registrationOpen: Boolean,
+    queueEditAllowed: Boolean,
+    queueReorderAllowed: Boolean,
     onTerminalAction: (ManagementTerminalActionRequest) -> Unit
 ) {
     val machines = overview?.machines.orEmpty()
@@ -727,7 +763,7 @@ private fun ManagementQueuePage(
                 }
                 OutlinedButton(
                     onClick = onCreateRegistration,
-                    enabled = overview.registrationOpen && machines.any(ManagementMachine::operational),
+                    enabled = queueEditAllowed && overview.registrationOpen && machines.any(ManagementMachine::operational),
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 9.dp)
                 ) {
@@ -743,6 +779,8 @@ private fun ManagementQueuePage(
                 machines = machines,
                 pendingCommandIds = pendingCommandIds,
                 onReorder = onReorder,
+                queueEditAllowed = queueEditAllowed,
+                queueReorderAllowed = queueReorderAllowed,
                 profiles = profiles,
                 queueRules = queueRules,
                 registrationOpen = registrationOpen,
@@ -985,6 +1023,8 @@ private fun ManagementMachineCard(
     machines: List<ManagementMachine>,
     pendingCommandIds: Set<String>,
     onReorder: (ManagementMachine) -> Unit,
+    queueEditAllowed: Boolean,
+    queueReorderAllowed: Boolean,
     profiles: List<ManagementProfile>,
     queueRules: Map<String, Boolean>,
     registrationOpen: Boolean,
@@ -1032,7 +1072,7 @@ private fun ManagementMachineCard(
                 Box {
                     IconButton(
                         onClick = { machineMenuOpen = true },
-                        enabled = !busy && machine.operational
+                        enabled = queueEditAllowed && !busy && machine.operational
                     ) {
                         Icon(Icons.Default.MoreVert, contentDescription = "机台队列操作")
                     }
@@ -1089,13 +1129,31 @@ private fun ManagementMachineCard(
                                 )
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("清空本机全部登记", color = Destructive) },
+                            enabled = machine.registrationCount > 0,
+                            onClick = {
+                                machineMenuOpen = false
+                                prompt = ManagementActionPrompt(
+                                    "清空${machine.name}的全部登记？",
+                                    "这会移除本机当前游玩和等待位置中的 ${machine.registrationCount} 份登记，但不会关闭其他机台或结束登记排队。此操作无法撤销。",
+                                    "确认清空本机登记",
+                                    request(
+                                        ManagementQueueAction.REMOVE_REGISTRATIONS,
+                                        registrations = machine.playing + machine.waiting,
+                                        reason = "管理后台清空本机全部登记"
+                                    ),
+                                    destructive = true
+                                )
+                            }
+                        )
                     }
                 }
             }
             if (machine.playing.isNotEmpty()) {
                 Button(
                     onClick = { roundMenuOpen = true },
-                    enabled = !busy && machine.operational,
+                    enabled = queueEditAllowed && !busy && machine.operational,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) { Text("结束本轮") }
@@ -1112,7 +1170,7 @@ private fun ManagementMachineCard(
                             )
                         )
                     },
-                    enabled = !busy && machine.operational,
+                    enabled = queueEditAllowed && !busy && machine.operational,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) { Text("开始下一轮") }
@@ -1120,7 +1178,7 @@ private fun ManagementMachineCard(
             if (machine.waitingPositions.size > 1) {
                 OutlinedButton(
                     onClick = { onReorder(machine) },
-                    enabled = machine.id !in pendingCommandIds,
+                    enabled = queueReorderAllowed && machine.id !in pendingCommandIds,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(vertical = 7.dp)
                 ) {
@@ -1140,16 +1198,17 @@ private fun ManagementMachineCard(
                         machines,
                         registration,
                         pendingCommandIds,
-                        profiles,
-                        registrationOpen,
-                        onTerminalAction
+                                    profiles,
+                                    registrationOpen,
+                                    queueEditAllowed,
+                                    onTerminalAction
                     )
                 }
                 ManagementPositionMenu(
                     target = ManagementPositionTarget(machine, machine.playing, playing = true),
                     machines = machines,
                     allowDeferOneRound = queueRules["allow_defer_one_round"] ?: true,
-                    enabled = !busy,
+                    enabled = queueEditAllowed && !busy,
                     onPrompt = { prompt = it },
                     onNoShow = { noShowTarget = it },
                     onTransfer = { transferTarget = it }
@@ -1185,7 +1244,7 @@ private fun ManagementMachineCard(
                                     ),
                                     machines = machines,
                                     allowDeferOneRound = queueRules["allow_defer_one_round"] ?: true,
-                                    enabled = !busy,
+                                    enabled = queueEditAllowed && !busy,
                                     onPrompt = { prompt = it },
                                     onNoShow = { noShowTarget = it },
                                     onTransfer = { transferTarget = it }
@@ -1199,6 +1258,7 @@ private fun ManagementMachineCard(
                                     pendingCommandIds,
                                     profiles,
                                     registrationOpen,
+                                    queueEditAllowed,
                                     onTerminalAction
                                 )
                             }
@@ -1584,6 +1644,11 @@ private fun ManagementReorderDialog(
     onSubmit: (List<List<String>>) -> Unit
 ) {
     val initialWaiting = machine.waitingPositions
+    val initialOrder = remember(machine.id, initialWaiting) {
+        initialWaiting.map { position ->
+            position.registrations.map(ManagementRegistration::registrationId)
+        }
+    }
     var waitingOrder by remember(machine.id, machine.waitingPositions) {
         mutableStateOf(initialWaiting)
     }
@@ -1591,11 +1656,23 @@ private fun ManagementReorderDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         title = { Text("调整${machine.name}等待顺序") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (waitingOrder.isEmpty()) {
-                    Text("暂无等待登记", color = SecondaryText)
-                } else {
-                    waitingOrder.forEachIndexed { index, position ->
+            if (waitingOrder.isEmpty()) {
+                Text("暂无等待登记", color = SecondaryText)
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(
+                        waitingOrder,
+                        key = { _, position ->
+                            position.registrations.joinToString("|") {
+                                it.registrationId
+                            }
+                        }
+                    ) { index, position ->
                         Surface(
                             color = PageBackground,
                             shape = RoundedCornerShape(6.dp)
@@ -1669,8 +1746,9 @@ private fun ManagementReorderDialog(
                         }
                     )
                 },
-                enabled = !busy && waitingOrder.map(ManagementWaitingPosition::index) !=
-                    initialWaiting.map(ManagementWaitingPosition::index)
+                enabled = !busy && waitingOrder.map { position ->
+                    position.registrations.map(ManagementRegistration::registrationId)
+                } != initialOrder
             ) {
                 if (busy) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -1691,6 +1769,7 @@ private fun ManagementRegistrationRow(
     pendingCommandIds: Set<String>,
     profiles: List<ManagementProfile>,
     registrationOpen: Boolean,
+    queueEditAllowed: Boolean,
     onTerminalAction: (ManagementTerminalActionRequest) -> Unit
 ) {
     var actionMenuOpen by remember(registration.registrationId) { mutableStateOf(false) }
@@ -1761,7 +1840,7 @@ private fun ManagementRegistrationRow(
                             )
                         )
                     },
-                    enabled = !pending,
+                    enabled = queueEditAllowed && !pending,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                     modifier = Modifier.height(38.dp)
                 ) {
@@ -1778,7 +1857,7 @@ private fun ManagementRegistrationRow(
                 Box {
                     IconButton(
                         onClick = { actionMenuOpen = true },
-                        enabled = registration.registrationId !in pendingCommandIds
+                        enabled = queueEditAllowed && registration.registrationId !in pendingCommandIds
                     ) {
                         Icon(Icons.Default.MoreVert, contentDescription = "登记操作")
                     }
@@ -2331,6 +2410,8 @@ private fun ManagementProfilesPage(
     loading: Boolean,
     pendingProfileIds: Set<String>,
     profileDeleteAllowed: Boolean,
+    profileEditAllowed: Boolean,
+    profileResetPasswordAllowed: Boolean,
     onEdit: (ManagementProfile) -> Unit,
     onPassword: (ManagementProfile) -> Unit,
     onDelete: (ManagementProfile) -> Unit
@@ -2343,15 +2424,65 @@ private fun ManagementProfilesPage(
         EmptyManagementPage("暂无玩家资料")
         return
     }
+    var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim().lowercase()
+    val visibleProfiles = remember(profiles, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            profiles
+        } else {
+            profiles.filter { profile ->
+                listOfNotNull(
+                    profile.nickname,
+                    profile.publicPlayerId,
+                    profile.qqNumber
+                ).any { value -> value.lowercase().contains(normalizedQuery) }
+            }
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Text("玩家资料库", color = PrimaryText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 2.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "玩家资料库",
+                        color = PrimaryText,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "${visibleProfiles.size}/${profiles.size}",
+                        color = TertiaryText,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("搜索昵称、玩家编号或 QQ") }
+                )
+            }
         }
-        items(profiles, key = { it.id }) { profile ->
+        if (visibleProfiles.isEmpty()) {
+            item {
+                Text(
+                    "没有匹配的玩家资料",
+                    color = SecondaryText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        items(visibleProfiles, key = { it.id }) { profile ->
                 Surface(color = CardBackground, shape = RoundedCornerShape(CardRadius), tonalElevation = 1.dp) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2379,7 +2510,7 @@ private fun ManagementProfilesPage(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = { onEdit(profile) },
-                            enabled = profile.id !in pendingProfileIds,
+                            enabled = profileEditAllowed && profile.id !in pendingProfileIds,
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 7.dp)
                         ) {
@@ -2387,7 +2518,7 @@ private fun ManagementProfilesPage(
                         }
                         OutlinedButton(
                             onClick = { onPassword(profile) },
-                            enabled = profile.webAccountBound && profile.id !in pendingProfileIds,
+                            enabled = profileResetPasswordAllowed && profile.webAccountBound && profile.id !in pendingProfileIds,
                             modifier = Modifier.fillMaxWidth(),
                             contentPadding = PaddingValues(vertical = 7.dp)
                         ) {
@@ -2665,6 +2796,7 @@ private fun ManagementCapabilitiesPage(
     }
     val capabilities = overview.capabilities
     val terminalPolicy = overview.terminalPolicy
+    val policyEditAllowed = capabilities.terminalPolicyEdit
     var draft by remember(terminalPolicy) { mutableStateOf(terminalPolicy) }
     val draftChanged = draft != terminalPolicy
     val entries = listOf(
@@ -2744,7 +2876,7 @@ private fun ManagementCapabilitiesPage(
                         ManagementPolicySwitchRow(
                             title = "允许线上登记",
                             checked = draft.allowOnlineRegistration,
-                            enabled = !busy,
+                            enabled = policyEditAllowed && !busy,
                             onCheckedChange = {
                                 draft = draft.copy(allowOnlineRegistration = it)
                             }
@@ -2752,7 +2884,7 @@ private fun ManagementCapabilitiesPage(
                         ManagementPolicySwitchRow(
                             title = "允许暂缓一次",
                             checked = draft.allowDeferOneRound,
-                            enabled = !busy,
+                            enabled = policyEditAllowed && !busy,
                             onCheckedChange = {
                                 draft = draft.copy(allowDeferOneRound = it)
                             }
@@ -2760,7 +2892,7 @@ private fun ManagementCapabilitiesPage(
                         ManagementPolicySwitchRow(
                             title = "允许暂时离开",
                             checked = draft.allowTemporaryLeave,
-                            enabled = !busy,
+                            enabled = policyEditAllowed && !busy,
                             onCheckedChange = {
                                 draft = draft.copy(allowTemporaryLeave = it)
                             }
@@ -2768,7 +2900,7 @@ private fun ManagementCapabilitiesPage(
                         ManagementPolicySwitchRow(
                             title = "QQ Bot 联动",
                             checked = draft.oneBotSyncEnabled,
-                            enabled = !busy,
+                            enabled = policyEditAllowed && !busy,
                             onCheckedChange = {
                                 draft = draft.copy(oneBotSyncEnabled = it)
                             }
@@ -2788,7 +2920,7 @@ private fun ManagementCapabilitiesPage(
                                 onClick = {
                                     onSubmit(draft.copy(managementAppBound = true))
                                 },
-                                enabled = !busy && (!terminalPolicy.managementAppBound || draftChanged),
+                                enabled = policyEditAllowed && !busy && (!terminalPolicy.managementAppBound || draftChanged),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 if (busy) {
@@ -2808,7 +2940,7 @@ private fun ManagementCapabilitiesPage(
                                     onClick = {
                                         onSubmit(draft.copy(managementAppBound = false))
                                     },
-                                    enabled = !busy,
+                                    enabled = policyEditAllowed && !busy,
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Text("解除接管")

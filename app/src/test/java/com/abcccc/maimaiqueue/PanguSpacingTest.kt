@@ -19,6 +19,7 @@ class PanguSpacingTest {
         assertEquals("线上登记·待签到", panguSpacing("线上登记·待签到"))
         assertEquals("未到场·已移除登记", panguSpacing("未到场 · 已移除登记"))
         assertEquals("A1·固定组合", panguSpacing("A1 · 固定组合"))
+        assertEquals("甲·乙", panguSpacing("甲 \t·\u00a0乙"))
         assertEquals("第 2 次轮空", panguSpacing("第2次轮空"))
         assertEquals("QQ 号 123456", panguSpacing("QQ号123456"))
     }
@@ -45,6 +46,8 @@ class PanguSpacingTest {
         assertEquals("中文\nA1", panguSpacing("中文\nA1"))
         assertEquals("左侧\n·机台 A", panguSpacing("左侧\n·机台A"))
         assertEquals("左侧\u2028·机台 A", panguSpacing("左侧\u2028·机台A"))
+        assertEquals("甲\n·乙", panguSpacing("甲\n · 乙"))
+        assertEquals("甲 乙", panguSpacing("甲 乙"))
     }
 
     @Test

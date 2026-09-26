@@ -137,6 +137,7 @@ internal data class RegistrationAvailabilityCommand(
     val createdAtMillis: Long,
     val queueId: String,
     val expectedQueueRevision: Long,
+    val expectedPolicyRevision: Long? = null,
     val expectedMachineConfigurationRevision: Long,
     val expectedRegistrationOpen: Boolean,
     val registrationOpen: Boolean,
@@ -168,6 +169,7 @@ internal data class MachineStatusUpdateCommand(
     override val commandId: String,
     val createdAtMillis: Long,
     val queueId: String,
+    val expectedPolicyRevision: Long? = null,
     val expectedMachineConfigurationRevision: Long,
     val machineId: MachineId,
     val machineStableId: String,
@@ -1327,6 +1329,9 @@ private fun parseRegistrationAvailability(
             createdAtMillis = command.getLong("created_at"),
             queueId = payload.getString("queue_id"),
             expectedQueueRevision = payload.getLong("expected_queue_revision"),
+            expectedPolicyRevision = payload.optionalNonNegativeLong(
+                "expected_management_policy_revision"
+            ),
             expectedMachineConfigurationRevision = payload.getLong(
                 "expected_machine_configuration_revision"
             ),
@@ -1478,6 +1483,9 @@ private fun parseMachineStatusUpdate(command: JSONObject?): MachineStatusUpdateC
             commandId = command.getString("command_id"),
             createdAtMillis = command.getLong("created_at"),
             queueId = payload.getString("queue_id"),
+            expectedPolicyRevision = payload.optionalNonNegativeLong(
+                "expected_management_policy_revision"
+            ),
             expectedMachineConfigurationRevision = payload.getLong(
                 "expected_machine_configuration_revision"
             ),
@@ -1602,6 +1610,9 @@ private fun parseManagementQueueAction(
             queueRevision = payload.getLong("queue_revision"),
             machineConfigurationRevision = payload.getLong(
                 "machine_configuration_revision"
+            ),
+            expectedPolicyRevision = payload.optionalNonNegativeLong(
+                "expected_management_policy_revision"
             ),
             action = ManagementQueueAction.valueOf(payload.getString("action")),
             machineId = payload.getString("machine_id"),
@@ -1844,6 +1855,9 @@ private fun JSONObject.optionalNonBlankString(name: String): String? =
 
 private fun JSONObject.optionalPositiveLong(name: String): Long? =
     if (!has(name) || isNull(name)) null else getLong(name).also { require(it > 0L) }
+
+private fun JSONObject.optionalNonNegativeLong(name: String): Long? =
+    if (!has(name) || isNull(name)) null else getLong(name).also { require(it >= 0L) }
 
 private fun JSONObject.optionalRegistrationOrder(name: String): List<String>? {
     if (!has(name) || isNull(name)) return null

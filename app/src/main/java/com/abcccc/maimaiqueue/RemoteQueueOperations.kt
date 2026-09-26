@@ -71,7 +71,8 @@ internal data class RemoteQueueExecutionState(
     val allowTemporaryLeave: Boolean,
     val machineCapacities: Map<String, Int> = emptyMap(),
     val machineStableIds: Map<String, String> = emptyMap(),
-    val machineConfigurationRevision: Long = 1L
+    val machineConfigurationRevision: Long = 1L,
+    val managementPolicyRevision: Long = 0L
 )
 
 internal fun RemoteQueueExecutionState.machineCapacity(machineId: String): Int =

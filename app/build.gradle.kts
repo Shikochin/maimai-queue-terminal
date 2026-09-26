@@ -44,11 +44,11 @@ val managementBuildEnabled = providers.gradleProperty("ENABLE_MANAGEMENT_BUILD")
     .orElse(true)
 val managementApiUrl = if (managementBuildEnabled.get()) queueManagementUrl.get() else ""
 val managementApiToken = if (managementBuildEnabled.get()) queueManagementToken.get() else ""
-val localAppVersionName = "0.13.5"
-val terminalAppVersionName = "0.13.5"
+val localAppVersionName = "0.13.6"
+val terminalAppVersionName = "0.13.6"
 val managementAppVersionName = "0.13.2"
-val localVersionCode = 71
-val terminalVersionCode = 71
+val localVersionCode = 72
+val terminalVersionCode = 72
 val managementVersionCode = 68
 
 android {

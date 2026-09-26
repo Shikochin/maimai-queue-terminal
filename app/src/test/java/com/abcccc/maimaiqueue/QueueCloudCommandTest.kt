@@ -437,6 +437,7 @@ class QueueCloudCommandTest {
         val availability = parsed[0] as RegistrationAvailabilityCommand
         assertTrue(!availability.registrationOpen)
         assertEquals(setOf("a".repeat(24)), availability.expectedRegistrationIds)
+        assertEquals(2L, availability.expectedPolicyRevision)
 
         val settings = parsed[1] as TerminalSettingsUpdateCommand
         assertEquals(1, settings.configuredMachineCount)
@@ -445,6 +446,7 @@ class QueueCloudCommandTest {
 
         val machine = parsed[2] as MachineStatusUpdateCommand
         assertEquals(MachineId.A, machine.machineId)
+        assertEquals(2L, machine.expectedPolicyRevision)
         assertEquals(MachineStopReason.OTHER, machine.stopReason)
         assertEquals("临时检修", machine.stopReasonDetail)
     }
@@ -533,13 +535,17 @@ class QueueCloudCommandTest {
         val overlongDetail = managementMachineStatusCommand().apply {
             getJSONObject("payload").put("stop_reason_detail", "字".repeat(41))
         }
+        val negativePolicyRevision = managementMachineStatusCommand().apply {
+            getJSONObject("payload").put("expected_management_policy_revision", -1)
+        }
 
         listOf(
             wrongSource,
             invalidStableId,
             unchangedState,
             missingOtherDetail,
-            overlongDetail
+            overlongDetail,
+            negativePolicyRevision
         ).forEach { command ->
             assertTrue(parseManagementCommand(command).isEmpty())
         }
@@ -580,6 +586,7 @@ class QueueCloudCommandTest {
             "operation_source": "MANAGEMENT_APP",
             "queue_id": "00000000-0000-0000-0000-000000000001",
             "expected_queue_revision": 4,
+            "expected_management_policy_revision": 2,
             "expected_machine_configuration_revision": 1,
             "expected_registration_open": true,
             "registration_open": false,
@@ -647,6 +654,7 @@ class QueueCloudCommandTest {
           "payload": {
             "operation_source": "MANAGEMENT_APP",
             "queue_id": "00000000-0000-0000-0000-000000000001",
+            "expected_management_policy_revision": 2,
             "expected_machine_configuration_revision": 1,
             "machine_id": "A",
             "machine_stable_id": "${"1".repeat(32)}",

@@ -42,6 +42,7 @@ internal data class ManagementQueueActionCommand(
     val queueId: String,
     val queueRevision: Long,
     val machineConfigurationRevision: Long,
+    val expectedPolicyRevision: Long? = null,
     val action: ManagementQueueAction,
     val machineId: String,
     val machineStableId: String,
@@ -94,6 +95,12 @@ internal fun decideManagementQueueAction(
     }
     if (command.machineConfigurationRevision != state.machineConfigurationRevision) {
         return reject("机台配置已经更新，请刷新管理后台后再操作。")
+    }
+    if (
+        command.expectedPolicyRevision != null &&
+        command.expectedPolicyRevision != state.managementPolicyRevision
+    ) {
+        return reject("终端接管策略已经更新，请刷新管理后台后再操作。")
     }
     if (state.machineStableIds[command.machineId] != command.machineStableId) {
         return reject("目标机台已经变化，请刷新管理后台后再操作。")
