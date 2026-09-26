@@ -13,6 +13,14 @@
 - `output/release-0.13.6` 已生成 local/terminal 签名 APK、现行管理 APK、现行网站和 Bot 附件及 `SHA256SUMS-0.13.6.txt`。两个新 APK 使用既有长期证书 v3 签名，证书 SHA-256 为 `daa2e919d2f8d956c0a93417aae601e6ec658edc5ae7c9673830c53f649ec925`。
 - GitHub Release、生产 API 版本配置和真实 `2000×1200` Android 触控截图验收在本条记录建立时仍待完成；未把管理后台同步迁移/故障恢复、网页绑定/重新绑定或多终端联动提前混入本补丁。
 
+## 2026-09-27 · 0.13.6 发布与新实例部署完成
+
+- 已推送提交 `0b4f625` 和注释标签 `v0.13.6`；GitHub Release 已创建为公开测试版（非草稿），上传 local/terminal `0.13.6`、management `0.13.2`、网站 `0.13.4`、Bot `0.3.13` 和 `SHA256SUMS-0.13.6.txt` 共 6 个附件。
+- 三个 APK 均通过 `aapt2 dump badging`、`zipalign -c -p 4` 和 `apksigner verify`；终端/local/management 均使用既有长期 v3 证书，证书 SHA-256 为 `daa2e919d2f8d956c0a93417aae601e6ec658edc5ae7c9673830c53f649ec925`。
+- 新实例 API `/opt/maimai-queue-status-instance-20260927` 已部署提交中的 `cloud-server/app.py`，`QUEUE_LATEST_TERMINAL_VERSION=0.13.6`；服务健康检查 200，匿名管理接口 401，数据库和环境文件保留在备份 `/var/backups/maimai-queue-status/20260927-0.13.6-terminal-layout`。
+- 新实例 Koishi `maimai-q-koishi-instance-20260927.service` 已重启并恢复 active/enabled，NapCat `napcat` 容器运行中，OneBot WebSocket 已建立；旧 `maimai-q-koishi.service` 继续保持 inactive，未误启动旧实例。
+- 服务端 `168` 项、Android 三 flavor 编译与单元测试、`queue-core:test` 全部通过；真实 `2000×1200` Android 触控截图仍需在目标设备上完成，不能由构建结果替代。
+
 ## 2026-09-06 · 0.13.4 发布候选完成
 
 - 终端玩家资料推荐改为近期游玩频率、新资料发现权重、封顶累计熟悉度和最近使用时间的多因素排序；搜索匹配质量优先，近期历史最多保留 16 条并兼容旧快照。
