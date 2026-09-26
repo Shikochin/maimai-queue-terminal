@@ -15,7 +15,7 @@
 
 ## 2026-09-27 · 0.13.6 发布与新实例部署完成
 
-- 已推送提交 `0b4f625` 和注释标签 `v0.13.6`；GitHub Release 已创建为公开测试版（非草稿），上传 local/terminal `0.13.6`、management `0.13.2`、网站 `0.13.4`、Bot `0.3.13` 和 `SHA256SUMS-0.13.6.txt` 共 6 个附件。
+- 已推送提交 `0b4f625` 和注释标签 `v0.13.6`；GitHub Release 已创建为正式版（非草稿、非预发布），上传 local/terminal `0.13.6`、management `0.13.2`、网站 `0.13.4`、Bot `0.3.13` 和 `SHA256SUMS-0.13.6.txt` 共 6 个附件。
 - 三个 APK 均通过 `aapt2 dump badging`、`zipalign -c -p 4` 和 `apksigner verify`；终端/local/management 均使用既有长期 v3 证书，证书 SHA-256 为 `daa2e919d2f8d956c0a93417aae601e6ec658edc5ae7c9673830c53f649ec925`。
 - 新实例 API `/opt/maimai-queue-status-instance-20260927` 已部署提交中的 `cloud-server/app.py`，`QUEUE_LATEST_TERMINAL_VERSION=0.13.6`；服务健康检查 200，匿名管理接口 401，数据库和环境文件保留在备份 `/var/backups/maimai-queue-status/20260927-0.13.6-terminal-layout`。
 - 新实例 Koishi `maimai-q-koishi-instance-20260927.service` 已重启并恢复 active/enabled，NapCat `napcat` 容器运行中，OneBot WebSocket 已建立；旧 `maimai-q-koishi.service` 继续保持 inactive，未误启动旧实例。
